@@ -4,8 +4,8 @@
  * Template Controller for nav2py
  */
 
- #ifndef NAV2PY_TEMPLATE_CONTROLLER__TEMPLATE_CONTROLLER_HPP_
- #define NAV2PY_TEMPLATE_CONTROLLER__TEMPLATE_CONTROLLER_HPP_
+ #ifndef NAV2PY_SICNAV_CONTROLLER__TEMPLATE_CONTROLLER_HPP_
+ #define NAV2PY_SICNAV_CONTROLLER__TEMPLATE_CONTROLLER_HPP_
  
  #include <string>
  #include <vector>
@@ -16,14 +16,14 @@
  #include "pluginlib/class_loader.hpp"
  #include "pluginlib/class_list_macros.hpp"
  
- namespace nav2py_template_controller
+ namespace nav2py_sicnav_controller
  {
  
- class TemplateController : public nav2py::Controller
+ class SicnavController : public nav2py::Controller
  {
  public:
-   TemplateController() = default;
-   ~TemplateController() override = default;
+   SicnavController() = default;
+   ~SicnavController() override = default;
  
    void configure(
      const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
@@ -46,7 +46,14 @@
    void sendData(
      const geometry_msgs::msg::PoseStamped & pose,
      const geometry_msgs::msg::Twist & velocity = geometry_msgs::msg::Twist());
- 
+
+   bool transformPose(
+      const std::shared_ptr<tf2_ros::Buffer> tf,
+      const std::string frame,
+      const geometry_msgs::msg::PoseStamped & in_pose,
+      geometry_msgs::msg::PoseStamped & out_pose,
+      const rclcpp::Duration & transform_tolerance
+   ) const;
    rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
    std::shared_ptr<tf2_ros::Buffer> tf_;
    std::string plugin_name_;
@@ -60,6 +67,6 @@
    std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> global_pub_;
  };
  
- }  // namespace nav2py_template_controller
+ }  // namespace nav2py_sicnav_controller
  
- #endif  // NAV2PY_TEMPLATE_CONTROLLER__TEMPLATE_CONTROLLER_HPP_
+ #endif  // NAV2PY_SICNAV_CONTROLLER__TEMPLATE_CONTROLLER_HPP_

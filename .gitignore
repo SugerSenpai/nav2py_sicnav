@@ -1,3 +1,4 @@
 *.pyc
 *.egg-info/
 __pycache__
+nav2py_template_controller/venv38/

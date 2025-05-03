@@ -10,16 +10,16 @@
  
  #include "nav2_core/exceptions.hpp"
  #include "nav2_util/node_utils.hpp"
- #include "nav2py_template_controller/template_controller.hpp"
+ #include "nav2py_sicnav_controller/sicnav_controller.hpp"
  #include "nav2_util/geometry_utils.hpp"
  #include "ament_index_cpp/get_package_share_directory.hpp"
  
  using nav2_util::declare_parameter_if_not_declared;
  
- namespace nav2py_template_controller
+ namespace sicnav_controller
  {
  
- void TemplateController::configure(
+ void SicnavController::configure(
    const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
    std::string name, const std::shared_ptr<tf2_ros::Buffer> tf,
    const std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros)
@@ -42,7 +42,7 @@
    transform_tolerance_ = rclcpp::Duration::from_seconds(transform_tolerance);
  
    // Initialize nav2py
-   std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_template_controller") + "/../../lib/nav2py_template_controller/nav2py_run" ;
+   std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run" ;
    nav2py_bootstrap(nav2py_script +
      " --host 127.0.0.1" +
      " --port 0");
@@ -52,11 +52,11 @@
    
    RCLCPP_INFO(
      logger_,
-     "Configured controller: %s of type nav2py_template_controller::TemplateController",
+     "Configured controller: %s of type nav2py_sicnav_controller::SicnavController",
      plugin_name_.c_str());
  }
  
- void TemplateController::sendData(
+ void SicnavController::sendData(
    const geometry_msgs::msg::PoseStamped & pose,
    const geometry_msgs::msg::Twist & velocity)
  {
@@ -103,7 +103,7 @@
    RCLCPP_INFO(logger_, "Data sent to Python side");
  }
  
- void TemplateController::cleanup()
+ void SicnavController::cleanup()
  {
    RCLCPP_INFO(
      logger_,
@@ -113,7 +113,7 @@
    global_pub_.reset();
  }
  
- void TemplateController::activate()
+ void SicnavController::activate()
  {
    RCLCPP_INFO(
      logger_,
@@ -122,7 +122,7 @@
    global_pub_->on_activate();
  }
  
- void TemplateController::deactivate()
+ void SicnavController::deactivate()
  {
    RCLCPP_INFO(
      logger_,
@@ -131,14 +131,14 @@
    global_pub_->on_deactivate();
  }
  
- void TemplateController::setSpeedLimit(const double& speed_limit, const bool& percentage)
+ void SicnavController::setSpeedLimit(const double& speed_limit, const bool& percentage)
  {
    // Empty implementation for interface compatibility
    (void) speed_limit;
    (void) percentage;
  }
  
- geometry_msgs::msg::TwistStamped TemplateController::computeVelocityCommands(
+ geometry_msgs::msg::TwistStamped SicnavController::computeVelocityCommands(
    const geometry_msgs::msg::PoseStamped & pose,
    const geometry_msgs::msg::Twist & velocity,
    nav2_core::GoalChecker * goal_checker)
@@ -179,7 +179,7 @@
    return cmd_vel;
  }
  
- void TemplateController::setPlan(const nav_msgs::msg::Path & path)
+ void SicnavController::setPlan(const nav_msgs::msg::Path & path)
  {
    global_plan_ = path;
    global_pub_->publish(path);
@@ -195,7 +195,7 @@
    }
  }
  
- }  // namespace nav2py_template_controller
+ }  // namespace nav2py_sicnav_controller
  
  // Register this controller as a nav2_core plugin
- PLUGINLIB_EXPORT_CLASS(nav2py_template_controller::TemplateController, nav2_core::Controller)
+ PLUGINLIB_EXPORT_CLASS(nav2py_sicnav_controller::SicnavController, nav2_core::Controller)
