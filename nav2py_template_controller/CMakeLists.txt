@@ -35,10 +35,12 @@ include_directories(
 
 set(dependencies
   rclcpp
+  rclcpp_lifecycle
   pluginlib
   tf2
+  tf2_ros
   geometry_msgs
-  nav_msgs
+  nav2_msgs
   nav2_costmap_2d
   nav2_core
   nav2_util
