@@ -16,6 +16,8 @@ find_package(nav2_core REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(nav2py REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
@@ -34,13 +36,14 @@ include_directories(
 )
 
 set(dependencies
+  nav2py_sicnav_controller
   rclcpp
   rclcpp_lifecycle
   pluginlib
   tf2
   tf2_ros
   geometry_msgs
-  nav2_msgs
+  nav_msgs
   nav2_costmap_2d
   nav2_core
   nav2_util
@@ -51,6 +54,8 @@ set(dependencies
 
 add_library(nav2py_sicnav_controller SHARED
         src/sicnav_controller.cpp)
+
+target_include_directories(nav2py_sicnav_controller PUBLIC include)
 
 # prevent pluginlib from using boost
 target_compile_definitions(nav2py_sicnav_controller PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")

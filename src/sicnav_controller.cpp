@@ -8,7 +8,6 @@
 #include <memory>
 #include "nav2_core/exceptions.hpp"
 #include "nav2_util/node_utils.hpp"
-#include "nav2_util/geometry_utils.hpp"
 #include "nav2py_sicnav_controller/sicnav_controller.hpp"
 #include "nav2py/utils.hpp"
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
@@ -41,7 +40,10 @@ namespace sicnav_controller
     declare_parameter_if_not_declared(node, plugin_name_ + ".max_angular_speed", rclcpp::ParameterValue(1.0));
     declare_parameter_if_not_declared(node, plugin_name_ + ".safety_threshold", rclcpp::ParameterValue(180.0));
 
-    node->get_parameter(plugin_name_ + ".transform_tolerance", transform_tolerance_);
+    // Get parameters
+    double transform_tolerance_secs;
+    node->get_parameter(plugin_name_ + ".transform_tolerance", transform_tolerance_secs);
+    transform_tolerance_ = rclcpp::Duration::from_seconds(transform_tolerance_secs);
     node->get_parameter(plugin_name_ + ".max_speed", max_speed_);
     node->get_parameter(plugin_name_ + ".neighbor_dist", neighbor_dist_);
     node->get_parameter(plugin_name_ + ".time_horizon", time_horizon_);
@@ -105,7 +107,7 @@ namespace sicnav_controller
         }
         else if (param.get_name() == plugin_name_ + ".transform_tolerance" && param.as_double() > 0.0)
         {
-          transform_tolerance_ = param.as_double();
+          transform_tolerance_ = rclcpp::Duration::from_seconds(param.as_double());
         }
         else
         {
@@ -119,7 +121,7 @@ namespace sicnav_controller
 
     // Initialize nav2py
     std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run";
-    nav2py_bootstrap(nav2py_script + " --host 127.0.0.1 --port 0");
+    nav2py_bootstrap(nav2py_script + " --host 127.0.1 --port 0");
 
     // Create publishers
     global_pub_ = node->create_publisher<nav_msgs::msg::Path>("received_global_plan", 1);
@@ -264,7 +266,7 @@ namespace sicnav_controller
     // Transform pose to global frame
     geometry_msgs::msg::PoseStamped transformed_pose;
     std::string global_frame = costmap_ros_->getGlobalFrameID();
-    if (!transformPose(tf_, global_frame, pose, transformed_pose, rclcpp::Duration::from_seconds(transform_tolerance_)))
+    if (!transformPose(tf_, global_frame, pose, transformed_pose, transform_tolerance_.seconds()))
     {
       RCLCPP_ERROR(logger_, "Failed to transform pose to %s frame", global_frame.c_str());
       return last_cmd_vel_;
@@ -359,11 +361,11 @@ namespace sicnav_controller
       const std::string frame,
       const geometry_msgs::msg::PoseStamped &in_pose,
       geometry_msgs::msg::PoseStamped &out_pose,
-      const rclcpp::Duration &transform_tolerance) const
+      const double transform_tolerance_secs) const
   {
     try
     {
-      out_pose = nav2_util::geometry_utils::transformPose(in_pose, frame, *tf, transform_tolerance);
+      out_pose = tf->transform(in_pose, frame, rclcpp::Duration::from_seconds(transform_tolerance_secs));
       return true;
     }
     catch (tf2::TransformException &ex)
@@ -387,7 +389,7 @@ namespace sicnav_controller
     nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *> checker(costmap_ros_->getCostmap());
     geometry_msgs::msg::PoseStamped current_pose;
     current_pose.header = cmd_vel.header;
-    current_pose.pose.position.x = 0.0; // Relative to robot
+    current_pose.pose.position.x = 0.0;
     current_pose.pose.position.y = 0.0;
     double cost = checker.footprintCostAtPose(
         current_pose.pose.position.x, current_pose.pose.position.y, 0.0, costmap_ros_->getRobotFootprint());
