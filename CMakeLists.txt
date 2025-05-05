@@ -36,7 +36,6 @@ include_directories(
 )
 
 set(dependencies
-  nav2py_sicnav_controller
   rclcpp
   rclcpp_lifecycle
   pluginlib
