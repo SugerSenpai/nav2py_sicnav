@@ -13,6 +13,7 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "nav_msgs/msg/detail/path__traits.hpp"
+#include "nav2py/controller.hpp"
 #include "nav2py/utils.hpp"
 
 using nav2_util::declare_parameter_if_not_declared;
@@ -82,7 +83,7 @@ namespace sicnav_controller
     }
 
     // Parameter callback
-    auto parameter_callback = [this](const std::vector<rclcpp::Parameter> &parameters) -> rcl_interfaces::msg::SetParametersResult
+    auto parameter_callback = [this](const std::vector<rclcpp::Parameter> parameters) -> rcl_interfaces::msg::SetParametersResult
     {
       rcl_interfaces::msg::SetParametersResult result;
       result.successful = true;
@@ -123,29 +124,50 @@ namespace sicnav_controller
     parameter_callback_handle_ = node->add_on_set_parameters_callback(parameter_callback);
 
     // Initialize nav2py
-    std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run";
-    nav2py_bootstrap(nav2py_script + " --host 127.0.0.1 --port 0");
+    try
+    {
+      std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run";
+      nav2py_bootstrap(nav2py_script + " --host 127.0.0.1 --port 0");
+      RCLCPP_INFO(logger_, "Initialized nav2py with script: %s", nav2py_script.c_str());
+    }
+    catch (const std::exception &e)
+    {
+      RCLCPP_ERROR(logger_, "Failed to initialize nav2py: %s", e.what());
+    }
 
     // Create publishers
     global_pub_ = node->create_publisher<nav_msgs::msg::Path>("received_global_plan", 1);
     scan_pub_ = node->create_publisher<sensor_msgs::msg::LaserScan>("sicnav/scan", 10);
 
     // Set up LaserScan subscription
-    nav2py::utils::Costmap costmap(
-        std::string(node->get_namespace()) + "/local_costmap/local_costmap",
-        node->get_namespace());
-    auto laserscan_observation = costmap.findObservationByType("LaserScan");
-    if (laserscan_observation.has_value())
+    try
     {
-      std::string topic = laserscan_observation.value().topic();
-      RCLCPP_INFO(logger_, "Laser scan topic found: %s", topic.c_str());
-      scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
-          topic, rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
-          std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
+      nav2py::utils::Costmap costmap(
+          std::string(node->get_namespace()) + "/local_costmap/local_costmap",
+          node->get_namespace());
+      auto laserscan_observation = costmap.findObservationByType("LaserScan");
+      if (laserscan_observation.has_value())
+      {
+        std::string topic = laserscan_observation.value().topic();
+        RCLCPP_INFO(logger_, "Laser scan topic found: %s", topic.c_str());
+        scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
+            topic, rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
+            std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
+      }
+      else
+      {
+        RCLCPP_WARN(logger_, "No laser scan topic found, falling back to /scan");
+        scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
+            "/scan", rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
+            std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
+      }
     }
-    else
+    catch (const std::exception &e)
     {
-      RCLCPP_WARN(logger_, "No laser scan topic found");
+      RCLCPP_ERROR(logger_, "Error setting up LaserScan subscription: %s", e.what());
+      scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
+          "/scan", rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
+          std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
     }
 
     // Initialize state
@@ -219,7 +241,14 @@ namespace sicnav_controller
   void SicnavController::cleanup()
   {
     RCLCPP_INFO(logger_, "Cleaning up controller: %s", plugin_name_.c_str());
-    nav2py_cleanup();
+    try
+    {
+      nav2py_cleanup();
+    }
+    catch (const std::exception &e)
+    {
+      RCLCPP_ERROR(logger_, "Error during nav2py cleanup: %s", e.what());
+    }
     global_pub_.reset();
     scan_pub_.reset();
     scan_sub_.reset();
@@ -308,7 +337,7 @@ namespace sicnav_controller
     try
     {
       RCLCPP_INFO(logger_, "Waiting for velocity command from Python...");
-      cmd_vel.twist = wait_for_cmd_vel();
+      cmd_vel.twist = this->wait_for_cmd_vel();
       RCLCPP_INFO(
           logger_,
           "Received velocity command: linear_x=%.2f, angular_z=%.2f",
@@ -427,8 +456,8 @@ namespace sicnav_controller
 
   geometry_msgs::msg::Twist SicnavController::wait_for_cmd_vel()
   {
-    return nav2py::wait_for_cmd_vel();
+    return this->wait_for_cmd_vel();
   }
 } // namespace sicnav_controller
 
-PLUGINLIB_EXPORT_CLASS(sicnav_controller::SicnavController, nav2_core::Controller)
+PLUGINLIB_EXPORT_CLASS(sicnav_controller::SicnavController, nav2_core::Controller);

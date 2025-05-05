@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include "nav2_core/controller.hpp"
+#include "nav2py/controller.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
 #include "tf2_ros/buffer.h"
@@ -22,7 +23,7 @@
 
 namespace sicnav_controller
 {
-  class SicnavController : public nav2_core::Controller
+  class SicnavController : public nav2_core::Controller, public nav2py::Controller
   {
   public:
     SicnavController();
@@ -63,8 +64,6 @@ namespace sicnav_controller
         const geometry_msgs::msg::Twist &velocity);
 
     void sendScan(const sensor_msgs::msg::LaserScan::SharedPtr scan);
-
-    geometry_msgs::msg::Twist wait_for_cmd_vel();
 
     rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
     std::shared_ptr<tf2_ros::Buffer> tf_;

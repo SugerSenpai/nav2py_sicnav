@@ -29,6 +29,7 @@ nav2py_package(nav2py_sicnav_controller)
 
 include_directories(
   include
+  ${nav2py_INCLUDE_DIRS}
 )
 
 set(dependencies
