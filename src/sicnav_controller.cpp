@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <string>
 #include <memory>
+#include <stdexcept>
+#include <chrono>
 #include "nav2_core/exceptions.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "nav2py_sicnav_controller/sicnav_controller.hpp"
@@ -13,6 +15,7 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "nav_msgs/msg/detail/path__traits.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "nav2py/controller.hpp"
 #include "nav2py/utils.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -128,12 +131,14 @@ namespace nav2py_sicnav_controller
     try
     {
       std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run";
+      RCLCPP_INFO(logger_, "Attempting to initialize nav2py with script: %s", nav2py_script.c_str());
       nav2py_bootstrap(nav2py_script + " --host 127.0.0.1 --port 0");
-      RCLCPP_INFO(logger_, "Initialized nav2py with script: %s", nav2py_script.c_str());
+      RCLCPP_INFO(logger_, "Initialized nav2py successfully");
     }
     catch (const std::exception &e)
     {
       RCLCPP_ERROR(logger_, "Failed to initialize nav2py: %s", e.what());
+      throw std::runtime_error("Failed to initialize nav2py");
     }
 
     // Create publishers
@@ -171,14 +176,42 @@ namespace nav2py_sicnav_controller
           std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
     }
 
+    // Set up Odometry subscription
+    try
+    {
+      odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+          "/task_generator_node/jackal/odom", rclcpp::SensorDataQoS(),
+          std::bind(&SicnavController::odomCallback, this, std::placeholders::_1));
+      RCLCPP_INFO(logger_, "Subscribed to odometry topic: /task_generator_node/jackal/odom");
+    }
+    catch (const std::exception &e)
+    {
+      RCLCPP_ERROR(logger_, "Error setting up odometry subscription: %s", e.what());
+    }
+
     // Initialize state
     last_cmd_vel_.header.frame_id = "";
     prev_cmd_vel_.header.frame_id = "";
 
     RCLCPP_INFO(
         logger_,
-        "Configured controller: %s of type nav2py_sicnav_controller::SicnavController with max_speed: %f, neighbor_dist: %f, time_horizon: %f",
-        plugin_name_.c_str(), max_speed_, neighbor_dist_, time_horizon_);
+        "Configured controller: %s of type nav2py_sicnav_controller::SicnavController with "
+        "max_speed: %f, neighbor_dist: %f, time_horizon: %f, smoothing_factor: %f, max_angular_speed: %f",
+        plugin_name_.c_str(), max_speed_, neighbor_dist_, time_horizon_, smoothing_factor_, max_angular_speed_);
+  }
+
+  void SicnavController::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+  {
+    try
+    {
+      std::string odom_yaml = nav_msgs::msg::to_yaml(*msg, true);
+      nav2py_send("odom", {odom_yaml});
+      RCLCPP_DEBUG(logger_, "Sent odometry data to Python controller");
+    }
+    catch (const std::exception &e)
+    {
+      RCLCPP_ERROR(logger_, "Error sending odometry: %s", e.what());
+    }
   }
 
   void SicnavController::sendData(
@@ -188,7 +221,7 @@ namespace nav2py_sicnav_controller
     static int frame_count = 0;
     frame_count++;
 
-     // Create structured data message
+    // Create structured data message
     std::stringstream ss;
     ss << "frame_info:\n";
     ss << "  id: " << frame_count << "\n";
@@ -216,7 +249,7 @@ namespace nav2py_sicnav_controller
     try
     {
       nav2py_send("data", {ss.str()});
-      RCLCPP_INFO(logger_, "Data sent to Python side");
+      RCLCPP_DEBUG(logger_, "Data sent to Python side");
     }
     catch (const std::exception &e)
     {
@@ -231,7 +264,7 @@ namespace nav2py_sicnav_controller
       scan_pub_->publish(*scan);
       std::string scan_yaml = sensor_msgs::msg::to_yaml(*scan, true);
       nav2py_send("scan", {scan_yaml});
-      RCLCPP_INFO(logger_, "Sent LaserScan data to Python controller");
+      RCLCPP_DEBUG(logger_, "Sent LaserScan data to Python controller");
     }
     catch (const std::exception &e)
     {
@@ -253,6 +286,7 @@ namespace nav2py_sicnav_controller
     global_pub_.reset();
     scan_pub_.reset();
     scan_sub_.reset();
+    odom_sub_.reset();
     parameter_callback_handle_.reset();
   }
 
@@ -337,12 +371,25 @@ namespace nav2py_sicnav_controller
 
     try
     {
-      RCLCPP_INFO(logger_, "Waiting for velocity command from Python...");
-      cmd_vel.twist = this->wait_for_cmd_vel();
-      RCLCPP_INFO(
-          logger_,
-          "Received velocity command: linear_x=%.2f, angular_z=%.2f",
-          cmd_vel.twist.linear.x, cmd_vel.twist.angular.z);
+      RCLCPP_DEBUG(logger_, "Waiting for velocity command from Python...");
+      // Add timeout (1 second) to prevent hanging
+      auto start_time = clock_->now();
+      while (!this->has_cmd_vel() && (clock_->now() - start_time).seconds() < 1.0)
+      {
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
+      }
+      if (this->has_cmd_vel())
+      {
+        cmd_vel.twist = this->wait_for_cmd_vel();
+        RCLCPP_INFO(
+            logger_,
+            "Received velocity command: linear_x=%.2f, angular_z=%.2f",
+            cmd_vel.twist.linear.x, cmd_vel.twist.angular.z);
+      }
+      else
+      {
+        throw std::runtime_error("Timeout waiting for velocity command");
+      }
     }
     catch (const std::exception &e)
     {
@@ -419,7 +466,7 @@ namespace nav2py_sicnav_controller
     nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *> checker(costmap_ros_->getCostmap());
     geometry_msgs::msg::PoseStamped current_pose;
     current_pose.header = cmd_vel.header;
-    current_pose.pose.position.x = 0.0; // Relative to robot
+    current_pose.pose.position.x = 0.0;
     current_pose.pose.position.y = 0.0;
     double cost = checker.footprintCostAtPose(
         current_pose.pose.position.x,

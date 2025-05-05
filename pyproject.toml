@@ -4,13 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nav2py_sicnav_controller"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
-    "rclpy",
-    "PyYAML>=6.0.2",
-    "numpy>=1.23.5"
+    "PyYAML==6.0.2",
+    "casadi==3.6.5",
+    "numpy==1.24.4",
+    "scipy==1.10.1",
+    "torch==1.13.1",
+    "torchvision==0.14.1",
+    "stable-baselines3==1.7.0",
+    "gym==0.21.0",
+    "matplotlib==3.7.5",
+    "tensorboard==2.14.0",
+    "tqdm==4.66.4",
+    "pandas==1.5.3",
+    "cython==0.29.33",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.8,<3.9"
 description = "SICNav Controller for Navigation2 with Python integration"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
