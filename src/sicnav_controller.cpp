@@ -9,15 +9,18 @@
 #include "nav2_core/exceptions.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "nav2py_sicnav_controller/sicnav_controller.hpp"
-#include "nav2py/utils.hpp"
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "nav_msgs/msg/detail/path__traits.hpp"
+#include "nav2py/utils.hpp"
 
 using nav2_util::declare_parameter_if_not_declared;
 
 namespace sicnav_controller
 {
+  SicnavController::SicnavController() = default;
+
   void SicnavController::configure(
       const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,
       std::string name, const std::shared_ptr<tf2_ros::Buffer> tf,
@@ -121,7 +124,7 @@ namespace sicnav_controller
 
     // Initialize nav2py
     std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run";
-    nav2py_bootstrap(nav2py_script + " --host 127.0.1 --port 0");
+    nav2py_bootstrap(nav2py_script + " --host 127.0.0.1 --port 0");
 
     // Create publishers
     global_pub_ = node->create_publisher<nav_msgs::msg::Path>("received_global_plan", 1);
@@ -137,7 +140,8 @@ namespace sicnav_controller
       std::string topic = laserscan_observation.value().topic();
       RCLCPP_INFO(logger_, "Laser scan topic found: %s", topic.c_str());
       scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
-          topic, 10, std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
+          topic, rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
+          std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
     }
     else
     {
@@ -160,11 +164,6 @@ namespace sicnav_controller
   {
     static int frame_count = 0;
     frame_count++;
-
-    // Add frame delimiter for logs
-    std::string frame_delimiter(50, '=');
-    RCLCPP_INFO(logger_, "\n%s", frame_delimiter.c_str());
-    RCLCPP_INFO(logger_, "===== SENDING FRAME %d =====", frame_count);
 
     // Create structured data message
     std::stringstream ss;
@@ -191,7 +190,6 @@ namespace sicnav_controller
     ss << "    y: " << velocity.angular.y << "\n";
     ss << "    z: " << velocity.angular.z << "\n";
 
-    // Send data
     try
     {
       nav2py_send("data", {ss.str()});
@@ -245,15 +243,15 @@ namespace sicnav_controller
   void SicnavController::setSpeedLimit(const double &speed_limit, const bool &percentage)
   {
     std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
-    if (percentage)
+    try
     {
-      max_speed_ = max_speed_ * speed_limit / 100.0;
+      nav2py_send("speed_limit", {std::to_string(speed_limit), percentage ? "true" : "false"});
+      RCLCPP_INFO(logger_, "Speed limit set to %f (percentage: %s)", speed_limit, percentage ? "true" : "false");
     }
-    else
+    catch (const std::exception &e)
     {
-      max_speed_ = speed_limit;
+      RCLCPP_ERROR(logger_, "Error sending speed limit: %s", e.what());
     }
-    RCLCPP_INFO(logger_, "Speed limit set to %f", max_speed_);
   }
 
   geometry_msgs::msg::TwistStamped SicnavController::computeVelocityCommands(
@@ -282,7 +280,7 @@ namespace sicnav_controller
         vel_in.header = pose.header;
         vel_in.vector.x = velocity.linear.x;
         vel_in.vector.y = velocity.linear.y;
-        tf2::doTransform(vel_in, vel_out, tf_->lookupTransform(global_frame, pose.header.frame_id, rclcpp::Time(0)));
+        tf2::doTransform(vel_in, vel_out, tf_->lookupTransform(global_frame, pose.header.frame_id, tf2::TimePointZero));
         transformed_velocity.linear.x = vel_out.vector.x;
         transformed_velocity.linear.y = vel_out.vector.y;
       }
@@ -307,15 +305,14 @@ namespace sicnav_controller
     cmd_vel.header.frame_id = pose.header.frame_id;
     cmd_vel.header.stamp = clock_->now();
 
-    // Wait for velocity command
     try
     {
       RCLCPP_INFO(logger_, "Waiting for velocity command from Python...");
       cmd_vel.twist = wait_for_cmd_vel();
       RCLCPP_INFO(
           logger_,
-          "Received velocity command: linear_x=%.2f, linear_y=%.2f, angular_z=%.2f",
-          cmd_vel.twist.linear.x, cmd_vel.twist.linear.y, cmd_vel.twist.angular.z);
+          "Received velocity command: linear_x=%.2f, angular_z=%.2f",
+          cmd_vel.twist.linear.x, cmd_vel.twist.angular.z);
     }
     catch (const std::exception &e)
     {
@@ -365,7 +362,9 @@ namespace sicnav_controller
   {
     try
     {
-      out_pose = tf->transform(in_pose, frame, rclcpp::Duration::from_seconds(transform_tolerance_secs));
+      tf2::Duration tf_timeout(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::duration<double>(transform_tolerance_secs)));
+      out_pose = tf->transform(in_pose, frame, tf_timeout);
       return true;
     }
     catch (tf2::TransformException &ex)
@@ -378,7 +377,8 @@ namespace sicnav_controller
   bool SicnavController::isValidCmdVel(const geometry_msgs::msg::TwistStamped &cmd_vel)
   {
     // Check velocity limits
-    if (std::abs(cmd_vel.twist.linear.x) > max_speed_ || std::abs(cmd_vel.twist.linear.y) > max_speed_ ||
+    if (std::abs(cmd_vel.twist.linear.x) > max_speed_ ||
+        std::abs(cmd_vel.twist.linear.y) > max_speed_ ||
         std::abs(cmd_vel.twist.angular.z) > max_angular_speed_)
     {
       RCLCPP_WARN(logger_, "Command velocity exceeds limits");
@@ -389,10 +389,13 @@ namespace sicnav_controller
     nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *> checker(costmap_ros_->getCostmap());
     geometry_msgs::msg::PoseStamped current_pose;
     current_pose.header = cmd_vel.header;
-    current_pose.pose.position.x = 0.0;
+    current_pose.pose.position.x = 0.0; // Relative to robot
     current_pose.pose.position.y = 0.0;
     double cost = checker.footprintCostAtPose(
-        current_pose.pose.position.x, current_pose.pose.position.y, 0.0, costmap_ros_->getRobotFootprint());
+        current_pose.pose.position.x,
+        current_pose.pose.position.y,
+        0.0,
+        costmap_ros_->getRobotFootprint());
     if (cost >= safety_threshold_)
     {
       RCLCPP_WARN(logger_, "Command velocity would cause collision, cost: %f", cost);
@@ -402,20 +405,29 @@ namespace sicnav_controller
     return true;
   }
 
-  geometry_msgs::msg::TwistStamped SicnavController::smoothVelocity(const geometry_msgs::msg::TwistStamped &cmd_vel)
+  geometry_msgs::msg::TwistStamped SicnavController::smoothVelocity(
+      const geometry_msgs::msg::TwistStamped &cmd_vel)
   {
     geometry_msgs::msg::TwistStamped smoothed_cmd = cmd_vel;
     if (!prev_cmd_vel_.header.frame_id.empty())
     {
-      smoothed_cmd.twist.linear.x = (1.0 - smoothing_factor_) * cmd_vel.twist.linear.x +
-                                    smoothing_factor_ * prev_cmd_vel_.twist.linear.x;
-      smoothed_cmd.twist.linear.y = (1.0 - smoothing_factor_) * cmd_vel.twist.linear.y +
-                                    smoothing_factor_ * prev_cmd_vel_.twist.linear.y;
-      smoothed_cmd.twist.angular.z = (1.0 - smoothing_factor_) * cmd_vel.twist.angular.z +
-                                     smoothing_factor_ * prev_cmd_vel_.twist.angular.z;
+      smoothed_cmd.twist.linear.x =
+          (1.0 - smoothing_factor_) * cmd_vel.twist.linear.x +
+          smoothing_factor_ * prev_cmd_vel_.twist.linear.x;
+      smoothed_cmd.twist.linear.y =
+          (1.0 - smoothing_factor_) * cmd_vel.twist.linear.y +
+          smoothing_factor_ * prev_cmd_vel_.twist.linear.y;
+      smoothed_cmd.twist.angular.z =
+          (1.0 - smoothing_factor_) * cmd_vel.twist.angular.z +
+          smoothing_factor_ * prev_cmd_vel_.twist.angular.z;
     }
     prev_cmd_vel_ = smoothed_cmd;
     return smoothed_cmd;
+  }
+
+  geometry_msgs::msg::Twist SicnavController::wait_for_cmd_vel()
+  {
+    return nav2py::wait_for_cmd_vel();
   }
 } // namespace sicnav_controller
 

@@ -11,6 +11,7 @@
 #include <mutex>
 #include "nav2_core/controller.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_lifecycle/lifecycle_publisher.hpp"
 #include "tf2_ros/buffer.h"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -21,10 +22,10 @@
 
 namespace sicnav_controller
 {
-  class SicnavController : public nav2py::Controller
+  class SicnavController : public nav2_core::Controller
   {
   public:
-    SicnavController() = default;
+    SicnavController();
     ~SicnavController() override = default;
 
     void configure(
@@ -35,23 +36,23 @@ namespace sicnav_controller
     void cleanup() override;
     void activate() override;
     void deactivate() override;
+
     geometry_msgs::msg::TwistStamped computeVelocityCommands(
-      const geometry_msgs::msg::PoseStamped &pose,
-      const geometry_msgs::msg::Twist &velocity,
-      nav2_core::GoalChecker *goal_checker) override;
+        const geometry_msgs::msg::PoseStamped &pose,
+        const geometry_msgs::msg::Twist &velocity,
+        nav2_core::GoalChecker *goal_checker) override;
 
     void setPlan(const nav_msgs::msg::Path &path) override;
 
     void setSpeedLimit(const double &speed_limit, const bool &percentage) override;
-      void setPlan(const nav_msgs::msg::Path &path) override;
 
   protected:
     bool transformPose(
-      const std::shared_ptr<tf2_ros::Buffer> tf,
-      const std::string frame,
-      const geometry_msgs::msg::PoseStamped &in_pose,
-      geometry_msgs::msg::PoseStamped &out_pose,
-      const double transform_tolerance_secs) const;
+        const std::shared_ptr<tf2_ros::Buffer> tf,
+        const std::string frame,
+        const geometry_msgs::msg::PoseStamped &in_pose,
+        geometry_msgs::msg::PoseStamped &out_pose,
+        const double transform_tolerance_secs) const;
 
     bool isValidCmdVel(const geometry_msgs::msg::TwistStamped &cmd_vel);
 
@@ -72,8 +73,6 @@ namespace sicnav_controller
     rclcpp::Logger logger_{rclcpp::get_logger("SicnavController")};
     rclcpp::Clock::SharedPtr clock_;
     rclcpp::Duration transform_tolerance_{0, 0};
-
-    // Parameters
     double max_speed_;
     double neighbor_dist_;
     double time_horizon_;
@@ -81,11 +80,9 @@ namespace sicnav_controller
     double max_angular_speed_;
     double safety_threshold_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
-
-    // State
     nav_msgs::msg::Path global_plan_;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr global_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr global_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     geometry_msgs::msg::TwistStamped last_cmd_vel_;
     geometry_msgs::msg::TwistStamped prev_cmd_vel_;
