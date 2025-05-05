@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "nav2py_sicnav_controller"
 version = "0.1.0"
 dependencies = [
-    "PyYAML>=6.0.2"
+    "rclpy",
+    "PyYAML>=6.0.2",
+    "numpy>=1.23.5"
 ]
 requires-python = ">=3.10"
 description = "SICNav Controller for Navigation2 with Python integration"
