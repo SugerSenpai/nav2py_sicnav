@@ -9,7 +9,6 @@
 #include <string>
 #include <memory>
 #include <mutex>
-#include "nav2_core/controller.hpp"
 #include "nav2py/controller.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
@@ -23,7 +22,7 @@
 
 namespace sicnav_controller
 {
-  class SicnavController : public nav2_core::Controller, public nav2py::Controller
+  class SicnavController : public nav2py::Controller
   {
   public:
     SicnavController();

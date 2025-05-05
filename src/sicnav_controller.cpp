@@ -453,11 +453,6 @@ namespace sicnav_controller
     prev_cmd_vel_ = smoothed_cmd;
     return smoothed_cmd;
   }
-
-  geometry_msgs::msg::Twist SicnavController::wait_for_cmd_vel()
-  {
-    return this->wait_for_cmd_vel();
-  }
 } // namespace sicnav_controller
 
 PLUGINLIB_EXPORT_CLASS(sicnav_controller::SicnavController, nav2_core::Controller);
