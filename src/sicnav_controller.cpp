@@ -42,7 +42,6 @@ namespace sicnav_controller
     declare_parameter_if_not_declared(node, plugin_name_ + ".safety_threshold", rclcpp::ParameterValue(180.0));
 
     node->get_parameter(plugin_name_ + ".transform_tolerance", transform_tolerance_);
-    transform_tolerance_ = rclcpp::Duration::from_seconds(transform_tolerance_);
     node->get_parameter(plugin_name_ + ".max_speed", max_speed_);
     node->get_parameter(plugin_name_ + ".neighbor_dist", neighbor_dist_);
     node->get_parameter(plugin_name_ + ".time_horizon", time_horizon_);
@@ -103,6 +102,10 @@ namespace sicnav_controller
         else if (param.get_name() == plugin_name_ + ".max_angular_speed" && param.as_double() > 0.0)
         {
           max_angular_speed_ = param.as_double();
+        }
+        else if (param.get_name() == plugin_name_ + ".transform_tolerance" && param.as_double() > 0.0)
+        {
+          transform_tolerance_ = param.as_double();
         }
         else
         {
@@ -261,7 +264,7 @@ namespace sicnav_controller
     // Transform pose to global frame
     geometry_msgs::msg::PoseStamped transformed_pose;
     std::string global_frame = costmap_ros_->getGlobalFrameID();
-    if (!transformPose(tf_, global_frame, pose, transformed_pose, transform_tolerance_))
+    if (!transformPose(tf_, global_frame, pose, transformed_pose, rclcpp::Duration::from_seconds(transform_tolerance_)))
     {
       RCLCPP_ERROR(logger_, "Failed to transform pose to %s frame", global_frame.c_str());
       return last_cmd_vel_;
@@ -360,7 +363,7 @@ namespace sicnav_controller
   {
     try
     {
-      out_pose = nav2_util::geometry_utils::transform_pose(in_pose, frame, *tf, transform_tolerance);
+      out_pose = nav2_util::geometry_utils::transformPose(in_pose, frame, *tf, transform_tolerance);
       return true;
     }
     catch (tf2::TransformException &ex)
