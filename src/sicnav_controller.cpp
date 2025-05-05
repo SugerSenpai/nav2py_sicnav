@@ -15,10 +15,11 @@
 #include "nav_msgs/msg/detail/path__traits.hpp"
 #include "nav2py/controller.hpp"
 #include "nav2py/utils.hpp"
+#include "pluginlib/class_list_macros.hpp"
 
 using nav2_util::declare_parameter_if_not_declared;
 
-namespace sicnav_controller
+namespace nav2py_sicnav_controller
 {
   SicnavController::SicnavController() = default;
 
@@ -83,7 +84,7 @@ namespace sicnav_controller
     }
 
     // Parameter callback
-    auto parameter_callback = [this](const std::vector<rclcpp::Parameter> parameters) -> rcl_interfaces::msg::SetParametersResult
+    auto parameter_callback = [this](const std::vector<rclcpp::Parameter> &parameters) -> rcl_interfaces::msg::SetParametersResult
     {
       rcl_interfaces::msg::SetParametersResult result;
       result.successful = true;
@@ -176,7 +177,7 @@ namespace sicnav_controller
 
     RCLCPP_INFO(
         logger_,
-        "Configured controller: %s of type sicnav_controller::SicnavController with max_speed: %f, neighbor_dist: %f, time_horizon: %f",
+        "Configured controller: %s of type nav2py_sicnav_controller::SicnavController with max_speed: %f, neighbor_dist: %f, time_horizon: %f",
         plugin_name_.c_str(), max_speed_, neighbor_dist_, time_horizon_);
   }
 
@@ -187,7 +188,7 @@ namespace sicnav_controller
     static int frame_count = 0;
     frame_count++;
 
-    // Create structured data message
+     // Create structured data message
     std::stringstream ss;
     ss << "frame_info:\n";
     ss << "  id: " << frame_count << "\n";
@@ -453,6 +454,6 @@ namespace sicnav_controller
     prev_cmd_vel_ = smoothed_cmd;
     return smoothed_cmd;
   }
-} // namespace sicnav_controller
+} // namespace nav2py_sicnav_controller
 
-PLUGINLIB_EXPORT_CLASS(sicnav_controller::SicnavController, nav2_core::Controller);
+PLUGINLIB_EXPORT_CLASS(nav2py_sicnav_controller::SicnavController, nav2_core::Controller);

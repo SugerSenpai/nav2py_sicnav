@@ -20,7 +20,7 @@
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 
-namespace sicnav_controller
+namespace nav2py_sicnav_controller
 {
   class SicnavController : public nav2py::Controller
   {
@@ -86,6 +86,6 @@ namespace sicnav_controller
     geometry_msgs::msg::TwistStamped prev_cmd_vel_;
     std::mutex cmd_vel_mutex_;
   };
-} // namespace sicnav_controller
+} // namespace nav2py_sicnav_controller
 
 #endif // NAV2PY_SICNAV_CONTROLLER__SICNAV_CONTROLLER_HPP_

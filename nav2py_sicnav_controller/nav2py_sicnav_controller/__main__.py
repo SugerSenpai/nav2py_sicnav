@@ -20,7 +20,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         self._register_callback('path', self._path_callback)
         self._register_callback('scan', self._scan_callback)
 
-        self.logger = get_logger('sicnav_controller')
+        self.logger = get_logger('nav2py_sicnav_controller')
         self.frame_count = 0
         self.path = None
         self.other_agents = []

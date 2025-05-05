@@ -24,7 +24,7 @@ find_package(ament_index_cpp REQUIRED)
 find_package(ament_cmake_venv REQUIRED)
 find_package(ament_cmake_venv_uv REQUIRED)
 
-uv_venv(PROJECTFILE pyproject.toml)
+uv_venv(PROJECTFILE pyproject.toml VERBOSE)
 nav2py_package(nav2py_sicnav_controller)
 
 include_directories(
