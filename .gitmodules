@@ -13,3 +13,6 @@
 [submodule "nav2py_template_controller/nav2py_sicnav_controller/safe-interactive-crowdnav"]
 	path = nav2py_template_controller/nav2py_sicnav_controller/safe-interactive-crowdnav
 	url = https://github.com/sepsamavi/safe-interactive-crowdnav.git
+[submodule "nav2py_sicnav_controller/safe-interactive-crowdnav"]
+	path = nav2py_sicnav_controller/safe-interactive-crowdnav
+	url = https://github.com/sepsamavi/safe-interactive-crowdnav.git
