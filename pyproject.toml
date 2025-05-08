@@ -13,12 +13,13 @@ dependencies = [
     "torch==1.13.1",
     "torchvision==0.14.1",
     "stable-baselines3==1.7.0",
-    "gym==0.21.0",
+    "gym==0.21.1",
     "matplotlib==3.7.5",
     "tensorboard==2.14.0",
     "tqdm==4.66.4",
     "pandas==1.5.3",
     "cython==0.29.33",
+    "rvo2 @ file://localhost/${CMAKE_CURRENT_SOURCE_DIR}/nav2py_sicnav_controller/safe-interactive-crowdnav/Python-RVO2",
 ]
 requires-python = ">=3.8,<3.9"
 description = "SICNav Controller for Navigation2 with Python integration"

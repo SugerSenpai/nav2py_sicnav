@@ -372,13 +372,8 @@ namespace nav2py_sicnav_controller
     try
     {
       RCLCPP_DEBUG(logger_, "Waiting for velocity command from Python...");
-      // Add timeout (1 second) to prevent hanging
       auto start_time = clock_->now();
-      while (!this->has_cmd_vel() && (clock_->now() - start_time).seconds() < 1.0)
-      {
-        rclcpp::sleep_for(std::chrono::milliseconds(10));
-      }
-      if (this->has_cmd_vel())
+      try
       {
         cmd_vel.twist = this->wait_for_cmd_vel();
         RCLCPP_INFO(
@@ -386,9 +381,16 @@ namespace nav2py_sicnav_controller
             "Received velocity command: linear_x=%.2f, angular_z=%.2f",
             cmd_vel.twist.linear.x, cmd_vel.twist.angular.z);
       }
-      else
+      catch (const std::exception &e)
       {
-        throw std::runtime_error("Timeout waiting for velocity command");
+        if ((clock_->now() - start_time).seconds() >= 1.0)
+        {
+          throw std::runtime_error("Timeout waiting for velocity command");
+        }
+        else
+        {
+          throw;
+        }
       }
     }
     catch (const std::exception &e)

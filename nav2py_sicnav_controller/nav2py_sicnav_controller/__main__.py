@@ -6,9 +6,17 @@ import numpy as np
 import logging
 import sys
 import os
+import pkg_resources
 
-# Add safe-interactive-crowdnav to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "safe-interactive-crowdnav"))
+try:
+    sicnav_path = pkg_resources.resource_filename(
+        'nav2py_sicnav_controller', 'safe-interactive-crowdnav'
+    )
+    sys.path.append(sicnav_path)
+except pkg_resources.DistributionNotFound:
+    sicnav_path = os.path.join(os.path.dirname(__file__), "..", "safe-interactive-crowdnav")
+    sys.path.append(sicnav_path)
+
 from sicnav.campc import CAMPC
 
 class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
@@ -54,10 +62,17 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self.logger.warning('max_angular_speed must be positive, setting to 1.0')
             self.max_angular_speed = 1.0
 
-        # Initialize CAMPC with relative config path
-        config_path = os.path.join(
-            os.path.dirname(__file__), "..", "safe-interactive-crowdnav", "sicnav", "configs", "policy.config"
-        )
+        # Initialize CAMPC with dynamic config path
+        try:
+            config_path = pkg_resources.resource_filename(
+                'nav2py_sicnav_controller',
+                'safe-interactive-crowdnav/sicnav/configs/policy.config'
+            )
+        except pkg_resources.DistributionNotFound:
+            config_path = os.path.join(
+                os.path.dirname(__file__), "..", "safe-interactive-crowdnav", "sicnav", "configs", "policy.config"
+            )
+        self.logger.info('Using config path: %s', config_path)
         try:
             self.policy = CAMPC(config_path=config_path, max_speed=self.max_speed, time_horizon=self.time_horizon)
             self.logger.info('CAMPC policy initialized with config: %s', config_path)
