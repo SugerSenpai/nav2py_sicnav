@@ -64,7 +64,7 @@ ament_target_dependencies(nav2py_sicnav_controller
 )
 
 # Custom command to setup Python-RVO2 after uv_venv
-set(SETUP_RVO2_PY "${CMAKE_SOURCE_DIR}/setup_rvo2.py")
+set(SETUP_RVO2_PY "${CMAKE_CURRENT_SOURCE_DIR}/setup_rvo2.py")
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/rvo2_setup
   COMMAND ${Python3_EXECUTABLE} ${SETUP_RVO2_PY}
