@@ -19,9 +19,17 @@ dependencies = [
     "tqdm==4.66.4",
     "pandas==1.5.3",
     "cython==0.29.33",
-    "rvo2 @ file://localhost/${CMAKE_CURRENT_SOURCE_DIR}/nav2py_sicnav_controller/safe-interactive-crowdnav/Python-RVO2",
 ]
 requires-python = ">=3.8,<3.9"
 description = "SICNav Controller for Navigation2 with Python integration"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
+
+[tool.setuptools]
+packages = ["nav2py_sicnav_controller"]
+
+[tool.setuptools.package-data]
+"nav2py_sicnav_controller" = [
+    "nav2py_sicnav_controller/*",
+    "safe-interactive-crowdnav/**/*"
+]
