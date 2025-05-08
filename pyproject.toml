@@ -15,7 +15,7 @@ dependencies = [
     "cycler==0.12.1",
     "cython==0.29.33",
     "fonttools==4.52.1",
-    "gym==0.21.0",
+    "gym==0.26.2",
     "idna==3.7",
     "importlib-metadata==4.13.0",
     "importlib-resources==6.4.0",
