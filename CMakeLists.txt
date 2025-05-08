@@ -24,7 +24,36 @@ find_package(ament_index_cpp REQUIRED)
 find_package(ament_cmake_venv REQUIRED)
 find_package(ament_cmake_venv_uv REQUIRED)
 
+# Create virtual environment
 uv_venv(PROJECTFILE pyproject.toml VERBOSE)
+
+# Install setuptools==59.8.0 to ensure compatibility with gym==0.21.0
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/venv_setuptools
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip install setuptools==59.8.0
+  DEPENDS uv_venv
+  COMMENT "Installing setuptools==59.8.0 in virtual environment"
+)
+
+# Install gym==0.21.0 using pip
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/venv_gym
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip install gym==0.21.0
+  DEPENDS ${CMAKE_BINARY_DIR}/venv_setuptools
+  COMMENT "Installing gym==0.21.0 in virtual environment"
+)
+
+# Install remaining dependencies from pyproject.toml
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/venv_deps
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/uv pip install -e .
+  DEPENDS ${CMAKE_BINARY_DIR}/venv_gym ${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMENT "Installing Python dependencies from pyproject.toml"
+)
+
+add_custom_target(VENV_DEPS ALL DEPENDS ${CMAKE_BINARY_DIR}/venv_deps)
+
 nav2py_package(nav2py_sicnav_controller)
 
 include_directories(
@@ -63,12 +92,12 @@ ament_target_dependencies(nav2py_sicnav_controller
   ${dependencies}
 )
 
-# Custom command to setup Python-RVO2 after uv_venv
+# Custom command to setup Python-RVO2 after dependencies
 set(SETUP_RVO2_PY "${CMAKE_CURRENT_SOURCE_DIR}/setup_rvo2.py")
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/rvo2_setup
   COMMAND ${Python3_EXECUTABLE} ${SETUP_RVO2_PY}
-  DEPENDS uv_venv ${SETUP_RVO2_PY}
+  DEPENDS VENV_DEPS ${SETUP_RVO2_PY}
   COMMENT "Setting up Python-RVO2 dependency"
 )
 
