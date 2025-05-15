@@ -22,7 +22,7 @@ def main():
     # Paths
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "nav2py_sicnav_controller"))
     rvo2_dir = os.path.join(base_dir, "safe-interactive-crowdnav", "Python-RVO2")
-    venv_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "nav2py_sicnav_controller", "venv"))
+    venv_dir = os.path.join(base_dir,"venv")
 
     # Check virtual environment
     if not os.path.exists(venv_dir):

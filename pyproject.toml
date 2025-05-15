@@ -1,10 +1,6 @@
 [build-system]
-requires = [
-    "setuptools==59.8.0",
-    "wheel==0.38.4",
-    "pip==21.3.1"
-]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "nav2py_sicnav_controller"
@@ -50,4 +46,12 @@ packages = ["nav2py_sicnav_controller"]
 "nav2py_sicnav_controller" = [
     "nav2py_sicnav_controller/*",
     "safe-interactive-crowdnav/**/*"
+]
+
+[tool.hatch.envs.default.scripts]
+install-gym = [
+    "python -m pip install --upgrade pip",
+    "python -m pip install setuptools==57.5.0 wheel==0.38.0",
+    "python -m pip install gym==0.21.0",
+    "python -m pip install stable-baselines3==1.7.0",
 ]

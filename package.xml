@@ -3,17 +3,15 @@
 <package format="3">
   <name>nav2py_sicnav_controller</name>
   <version>0.0.0</version>
-  <description>template for nav2 integration of standalone python controller plugin</description>
+  <description>Safe Interactive Crowd Navigation Controller for Navigation2</description>
   <maintainer email="dev@voshch.dev">voshch</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_venv</buildtool_depend>
-  <buildtool_depend>ament_cmake_venv_uv</buildtool_depend>
   
   <depend>nav2py</depend>
   <depend>ament_cmake_venv_uv</depend>
-
   <depend>nav2_common</depend>
   <depend>nav2_core</depend>
   <depend>nav2_util</depend>
@@ -28,7 +26,6 @@
   <depend>tf2_geometry_msgs</depend>
   <depend>ament_index_cpp</depend>
   <depend>people_msgs</depend>
-  <!-- Scan -->
   <depend>sensor_msgs</depend>
 
   <exec_depend>nav2_bringup</exec_depend>
@@ -36,7 +33,6 @@
   <exec_depend>python3-ipopt</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
-
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
@@ -44,5 +40,4 @@
     <build_type>ament_cmake</build_type>
     <nav2_core plugin="${prefix}/nav2py_sicnav_controller.xml" />
   </export>
-
 </package>
