@@ -16,3 +16,6 @@
 [submodule "nav2py_sicnav_controller/safe-interactive-crowdnav"]
 	path = nav2py_sicnav_controller/safe-interactive-crowdnav
 	url = https://github.com/sepsamavi/safe-interactive-crowdnav.git
+[submodule "nav2py_sicnav_controller/Python-RVO2"]
+	path = nav2py_sicnav_controller/Python-RVO2
+	url = https://github.com/sybrenstuvel/Python-RVO2.git

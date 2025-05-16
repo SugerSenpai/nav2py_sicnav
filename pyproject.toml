@@ -33,17 +33,17 @@ dependencies = [
     "urllib3==2.2.1",
     "zipp==3.19.0"
 ]
-requires-python = ">=3.8,<3.9"
+requires-python = ">=3.8,<=3.10"
 description = "SICNav Controller for Navigation2 with Python integration"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 
 [tool.setuptools]
-packages = ["nav2py_sicnav_controller"]
+packages = ["nav2py_sicnav_controller.nav2py_sicnav_controller"]
 
 [tool.setuptools.package-data]
-"nav2py_sicnav_controller" = [
-    "nav2py_sicnav_controller/*",
+"nav2py_sicnav_controller.nav2py_sicnav_controller" = [
+    "*.py",
     "safe-interactive-crowdnav/**/*"
 ]
 
