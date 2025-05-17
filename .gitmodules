@@ -1,21 +1,6 @@
-[submodule "nav2py"]
-	path = nav2py
-	url = https://github.com/voshch/nav2py.git
-	branch = humble
-[submodule "ament_cmake_venv_uv"]
-	path = ament_cmake_venv_uv
-	url = https://github.com/voshch/ament_cmake_venv_uv.git
-	branch = humble
-[submodule "ament_cmake_venv"]
-	path = ament_cmake_venv
-	url = https://github.com/voshch/ament_cmake_venv.git
-	branch = humble
-[submodule "nav2py_template_controller/nav2py_sicnav_controller/safe-interactive-crowdnav"]
-	path = nav2py_template_controller/nav2py_sicnav_controller/safe-interactive-crowdnav
+[submodule "deps/safe-interactive-crowdnav"]
+	path = deps/safe-interactive-crowdnav
 	url = https://github.com/sepsamavi/safe-interactive-crowdnav.git
-[submodule "nav2py_sicnav_controller/safe-interactive-crowdnav"]
-	path = nav2py_sicnav_controller/safe-interactive-crowdnav
-	url = https://github.com/sepsamavi/safe-interactive-crowdnav.git
-[submodule "nav2py_sicnav_controller/Python-RVO2"]
-	path = nav2py_sicnav_controller/Python-RVO2
+[submodule "deps/Python-RVO2"]
+	path = deps/Python-RVO2
 	url = https://github.com/sybrenstuvel/Python-RVO2.git

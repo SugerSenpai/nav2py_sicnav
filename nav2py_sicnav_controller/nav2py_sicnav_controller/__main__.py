@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-import yaml
+import logging
+import os
+import sys
+
 import nav2py
 import nav2py.interfaces
 import numpy as np
-import logging
-import sys
-import os
 import pkg_resources
+import yaml
+from sicnav.policy.campc import CollisionAvoidMPC as CAMPC
 
-try:
-    sicnav_path = pkg_resources.resource_filename(
-        'nav2py_sicnav_controller', 'safe-interactive-crowdnav'
-    )
-    sys.path.append(sicnav_path)
-except pkg_resources.DistributionNotFound:
-    sicnav_path = os.path.join(os.path.dirname(__file__), "..", "safe-interactive-crowdnav")
-    sys.path.append(sicnav_path)
-
-from .safe_interactive_crowdnav.sicnav.policy.campc import CollisionAvoidMPC as CAMPC
 
 class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
     def __init__(self, *args, **kwargs):
@@ -266,9 +258,9 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 # Smooth velocity
                 if self.prev_cmd_vel is not None:
                     linear_x = (1.0 - self.smoothing_factor) * linear_x + \
-                               self.smoothing_factor * self.prev_cmd_vel[0]
+                        self.smoothing_factor * self.prev_cmd_vel[0]
                     angular_z = (1.0 - self.smoothing_factor) * angular_z + \
-                                self.smoothing_factor * self.prev_cmd_vel[2]
+                        self.smoothing_factor * self.prev_cmd_vel[2]
                 self.prev_cmd_vel = [linear_x, 0.0, angular_z]
 
                 self.logger.info(f"Sending control commands: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
@@ -282,6 +274,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         except Exception as e:
             self.logger.error(f"Error processing data: %s", str(e))
             self._send_cmd_vel(0.0, 0.0)
+
 
 if __name__ == "__main__":
     nav2py.main(SicnavController)
