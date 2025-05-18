@@ -101,4 +101,6 @@ ament_export_include_directories(include)
 ament_export_libraries(nav2py_sicnav_controller)
 ament_export_dependencies(${dependencies})
 
+ament_python_install_package(nav2py_sicnav_controller)
+
 ament_package()
