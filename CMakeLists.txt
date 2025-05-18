@@ -25,34 +25,20 @@ find_package(nav2py REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
-set(RVO2_DIR "${CMAKE_CURRENT_SOURCE_DIR}/nav2py_sicnav_controller/Python-RVO2")
-
-add_custom_command(
-  OUTPUT ${RVO2_DIR}/.git
-  COMMAND git submodule update --init --recursive
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/nav2py_sicnav_controller
-  COMMENT "Initializing Python-RVO2 submodule"
-)
-add_custom_target(RVO2_SUBMODULE ALL DEPENDS ${RVO2_DIR}/.git)
-
 uv_venv(PROJECTFILE pyproject.toml)
-
-add_custom_command(
-  OUTPUT ${CMAKE_BINARY_DIR}/python_version_check
-  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/python --version > ${CMAKE_BINARY_DIR}/python_version.txt
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  DEPENDS VENV_CREATED
-  COMMENT "Checking Python version in virtual environment"
-)
-add_custom_target(PYTHON_VERSION_CHECK ALL DEPENDS ${CMAKE_BINARY_DIR}/python_version_check)
 
 venv_ensure_pip()
 
+venv_pip_install(gym==0.21.0)
+venv_pip_install_local("${CMAKE_CURRENT_SOURCE_DIR}/deps/safe-interactive-crowdnav")
+
+set(RVO2_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/Python-RVO2")
+
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/rvo2_installed
-  COMMAND ${CMAKE_COMMAND} -E env CXX=/usr/bin/g++ ${CMAKE_BINARY_DIR}/venv/bin/pip install -e ${RVO2_DIR}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  DEPENDS VENV_CREATED RVO2_SUBMODULE PYTHON_VERSION_CHECK
+  COMMAND ${venv_clean_pythonpath} CC=gcc CXX=g++ ${venv_python} -m pip install -e "${RVO2_DIR}"
+  WORKING_DIRECTORY "${venv_build_dir}"
+  DEPENDS VENV_CREATED
   COMMENT "Installing Python-RVO2 with g++"
 )
 add_custom_target(RVO2_INSTALL ALL DEPENDS ${CMAKE_BINARY_DIR}/rvo2_installed)
@@ -84,28 +70,6 @@ ament_target_dependencies(nav2py_sicnav_controller
   sensor_msgs
   ament_index_cpp
 )
-
-install(TARGETS nav2py_sicnav_controller
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
-install(DIRECTORY include/
-  DESTINATION share/${PROJECT_NAME}/include/
-)
-install(DIRECTORY nav2py_sicnav_controller/
-  DESTINATION share/${PROJECT_NAME}/nav2py_sicnav_controller/
-)
-install(DIRECTORY nav2py_sicnav_controller/safe-interactive-crowdnav/
-  DESTINATION share/${PROJECT_NAME}/safe-interactive-crowdnav/
-)
-install(DIRECTORY nav2py_sicnav_controller/Python-RVO2/
-  DESTINATION share/${PROJECT_NAME}/Python-RVO2/
-)
-install(FILES nav2py_sicnav_controller.xml
-  DESTINATION share/${PROJECT_NAME}
-)
-
 pluginlib_export_plugin_description_file(nav2_core nav2py_sicnav_controller.xml)
 
 if(BUILD_TESTING)
