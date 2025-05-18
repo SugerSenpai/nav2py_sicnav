@@ -25,8 +25,24 @@ find_package(nav2py REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
-uv_venv(PROJECTFILE pyproject.toml)
+set(dependencies
+  rclcpp
+  rclcpp_lifecycle
+  pluginlib
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  geometry_msgs
+  nav_msgs
+  nav2_costmap_2d
+  nav2_core
+  nav2_util
+  nav2py
+  sensor_msgs
+  ament_index_cpp
+)
 
+uv_venv(PROJECTFILE pyproject.toml)
 venv_ensure_pip()
 
 venv_pip_install(gym==0.21.0)
@@ -43,8 +59,6 @@ add_custom_command(
 )
 add_custom_target(RVO2_INSTALL ALL DEPENDS ${CMAKE_BINARY_DIR}/rvo2_installed)
 
-nav2py_package(nav2py_sicnav_controller)
-
 include_directories(
   include
   ${nav2py_INCLUDE_DIRS}
@@ -55,21 +69,25 @@ add_library(nav2py_sicnav_controller SHARED
 )
 target_compile_definitions(nav2py_sicnav_controller PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 ament_target_dependencies(nav2py_sicnav_controller
-  rclcpp
-  rclcpp_lifecycle
-  pluginlib
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
-  geometry_msgs
-  nav_msgs
-  nav2_costmap_2d
-  nav2_core
-  nav2_util
-  nav2py
-  sensor_msgs
-  ament_index_cpp
+  ${dependencies}
 )
+
+install(TARGETS nav2py_sicnav_controller
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib
+)
+
+install(FILES nav2py_sicnav_controller.xml DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY nav2py_sicnav_controller/
+  DESTINATION share/${PROJECT_NAME}/nav2py_sicnav_controller/
+  USE_SOURCE_PERMISSIONS
+  PATTERN "__pycache__" EXCLUDE
+)
+install(DIRECTORY include/ DESTINATION include/)
+
+nav2py_package(nav2py_sicnav_controller)
+
 pluginlib_export_plugin_description_file(nav2_core nav2py_sicnav_controller.xml)
 
 if(BUILD_TESTING)
@@ -81,6 +99,6 @@ endif()
 
 ament_export_include_directories(include)
 ament_export_libraries(nav2py_sicnav_controller)
-ament_export_dependencies(ament_cmake rclcpp rclcpp_lifecycle pluginlib tf2 tf2_ros tf2_geometry_msgs geometry_msgs nav_msgs nav2_costmap_2d nav2_core nav2_util nav2py sensor_msgs ament_index_cpp)
+ament_export_dependencies(${dependencies})
 
 ament_package()

@@ -7,16 +7,6 @@ import logging
 import sys
 import os
 import pkg_resources
-
-try:
-    sicnav_path = pkg_resources.resource_filename(
-        'nav2py_sicnav_controller', 'safe-interactive-crowdnav'
-    )
-    sys.path.append(sicnav_path)
-except pkg_resources.DistributionNotFound:
-    sicnav_path = os.path.join(os.path.dirname(__file__), "..", "safe-interactive-crowdnav")
-    sys.path.append(sicnav_path)
-
 from sicnav.policy.campc import CollisionAvoidMPC as CAMPC
 
 class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
