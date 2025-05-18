@@ -7,7 +7,7 @@ import logging
 import sys
 import os
 import pkg_resources
-from sicnav.policy.campc import CollisionAvoidMPC as CAMPC
+from sicnav.policy import CollisionAvoidMPC as CAMPC
 
 class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
     def __init__(self, *args, **kwargs):
