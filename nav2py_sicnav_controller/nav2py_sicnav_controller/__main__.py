@@ -60,6 +60,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.odom_topic = "/task_generator_node/jackal/odom"
+        self.feedback_topic = "/task_generator_node/jackal/follow_path/_action/feedback"
         self._callbacks = {
             'data': self._data_callback,
             'path': self._path_callback,
@@ -67,7 +68,8 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             'sicnav/scan': self._scan_callback,
             'task_generator_node/jackal/sicnav/scan': self._scan_callback,
             self.odom_topic: self._odom_callback,
-            'speed_limit': self._speed_limit_callback
+            'speed_limit': self._speed_limit_callback,
+            self.feedback_topic: self._feedback_callback
         }
         for topic, callback in self._callbacks.items():
             self._register_callback(topic, callback)
@@ -78,19 +80,20 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         self.frame_count = 0
         self.odom_count = 0
         self.last_odom_time = 0
+        self.odom_timeout = 5.0
         self.path = None
         self.other_agents = []
         self.odom_data = None
         self.prev_cmd_vel = None
         self.speed_limit = None
-        self.last_log_time = {'odom': 0, 'scan': 0}
+        self.last_log_time = {'odom': 0, 'scan': 0, 'feedback': 0}
 
         self.logger.info('Registered callbacks for topics: %s', ', '.join(self._callbacks.keys()))
 
         self.max_speed = 0.5
         self.neighbor_dist = 5.0
         self.time_horizon = 5.0
-        self.smoothing_factor = 0.0
+        self.smoothing_factor = 0.1
         self.max_angular_speed = 1.0
         self.robot_radius = 0.32
 
@@ -104,8 +107,8 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self.logger.warning('time_horizon must be positive, setting to 5.0')
             self.time_horizon = 5.0
         if self.smoothing_factor < 0.0 or self.smoothing_factor > 1.0:
-            self.logger.warning('smoothing_factor must be in [0,1], setting to 0.0')
-            self.smoothing_factor = 0.0
+            self.logger.warning('smoothing_factor must be in [0,1], setting to 0.1')
+            self.smoothing_factor = 0.1
         if self.max_angular_speed <= 0.0:
             self.logger.warning('max_angular_speed must be positive, setting to 1.0')
             self.max_angular_speed = 1.0
@@ -141,7 +144,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 self.logger.warning('Empty policy.config, using fallback')
                 config.read_dict({
                     'campc': {
-                        'horiz': '4',
+                        'horiz': '8',
                         'soft_constraints': 'true',
                         'term_const': 'false',
                         'ref_type': 'point_stab',
@@ -151,13 +154,13 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                     'mpc_env': {
                         'hum_model': 'orca_casadi_kkt',
                         'priviledged_info': 'true',
-                        'human_v_max_assumption': '0.5'
+                        'human_v_max_assumption': '1.0'
                     }
                 })
             if 'campc' not in config.sections():
                 self.logger.warning('No [campc] section, adding fallback')
                 config['campc'] = {
-                    'horiz': '4',
+                    'horiz': '8',
                     'soft_constraints': 'true',
                     'term_const': 'false',
                     'ref_type': 'point_stab',
@@ -169,7 +172,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 config['mpc_env'] = {
                     'hum_model': 'orca_casadi_kkt',
                     'priviledged_info': 'true',
-                    'human_v_max_assumption': '0.5'
+                    'human_v_max_assumption': '1.0'
                 }
             self.policy = CAMPC()
             self.policy.configure(config)
@@ -197,21 +200,37 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 self.logger.info(f'Odom message {self.odom_count}, time since last: {current_time - self.last_odom_time:.2f}s')
                 self.last_log_time['odom'] = current_time
             self.last_odom_time = current_time
+
             if isinstance(odom_, list) and len(odom_) > 0:
                 data_str = odom_[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 self.logger.debug(f'Raw odom data: {data_str}')
-                self.odom_data = yaml.safe_load(data_str)
-                if self.odom_data and 'header' in self.odom_data:
-                    self.logger.info(f'Odom frame_id: {self.odom_data["header"]["frame_id"]}')
-                else:
-                    self.logger.warning('Invalid odom_data structure')
+                try:
+                    parsed_data = yaml.safe_load(data_str)
+                    self.logger.debug(f'Parsed odom data: {parsed_data}')
+                    if parsed_data and 'pose' in parsed_data:
+                        self.odom_data = parsed_data
+                        if 'header' in parsed_data:
+                            self.logger.info(f'Odom frame_id: {parsed_data["header"].get("frame_id", "unknown")}')
+                        if self.path and 'poses' in self.path and len(self.path['poses']) > 0:
+                            self._compute_velocity_commands(parsed_data)
+                    else:
+                        self.logger.warning('Invalid odom_data: missing pose field')
+                        self.odom_data = None
+                except yaml.YAMLError as e:
+                    self.logger.error(f'Failed to parse odom YAML: {str(e)}')
+                    self.odom_data = None
             else:
                 self.logger.warning('Empty or invalid odom message')
                 self.odom_data = None
+
+            if self.odom_data is None:
+                self.logger.warning('Odometry data is None after processing')
         except Exception as e:
             self.logger.error(f'Error processing odometry data: {str(e)}')
+            import traceback
+            self.logger.error(traceback.format_exc())
             self.odom_data = None
 
     def _path_callback(self, path_):
@@ -303,74 +322,53 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self.logger.error(f'Error processing speed limit: {str(e)}')
             pass
 
-    def _data_callback(self, data):
+    def _feedback_callback(self, feedback_):
         try:
-            self.frame_count += 1
-            frame_delimiter = "=" * 50
-            self.logger.info(f"\n{frame_delimiter}\nPROCESSING FRAME {self.frame_count}")
-
-            if isinstance(data, list) and len(data) > 0:
-                data_str = data[0]
+            current_time = time.time()
+            if current_time - self.last_log_time['feedback'] >= 5.0:
+                self.logger.debug('Received action feedback message')
+                self.last_log_time['feedback'] = current_time
+            if isinstance(feedback_, list) and len(feedback_) > 0:
+                data_str = feedback_[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
-                parsed_data = yaml.safe_load(data_str)
-            else:
-                self.logger.error(f"Unexpected data type: {type(data)}")
-                self._send_cmd_vel(0.0, 0.0)
-                return
+                feedback_data = yaml.safe_load(data_str)
+                self.logger.debug(f'Action feedback: {feedback_data}')
+                if feedback_data and 'feedback' in feedback_data:
+                    distance_to_goal = feedback_data['feedback'].get('distance_to_goal', None)
+                    if distance_to_goal is not None:
+                        self.logger.info(f'Distance to goal: {distance_to_goal:.2f} meters')
+        except Exception as e:
+            self.logger.error(f'Error processing feedback data: {str(e)}')
+            pass
 
-            frame_info = parsed_data.get('frame_info', {})
-            frame_id = frame_info.get('id', 0)
-            timestamp = frame_info.get('timestamp', 0)
-            self.logger.info(f"Frame ID: {frame_id}, Timestamp: {timestamp}")
+    def _compute_velocity_commands(self, parsed_data):
+        try:
+            pose = parsed_data.get('pose', {})
+            position = pose.get('position', {})
+            x = position.get('x', 0.0)
+            y = position.get('y', 0.0)
+            orientation = pose.get('orientation', {})
+            qx = orientation.get('x', 0.0)
+            qy = orientation.get('y', 0.0)
+            qz = orientation.get('z', 0.0)
+            qw = orientation.get('w', 1.0)
 
-            robot_pose = parsed_data.get('robot_pose', {})
-            position = robot_pose.get('position', {})
-            pose_x = position.get('x', 0.0)
-            pose_y = position.get('y', 0.0)
-            orientation = robot_pose.get('orientation', {})
-            pose_qx = orientation.get('x', 0.0)
-            pose_qy = orientation.get('y', 0.0)
-            pose_qz = orientation.get('z', 0.0)
-            pose_qw = orientation.get('w', 1.0)
-
-            velocity = parsed_data.get('robot_velocity', {})
-            linear_x = velocity.get('linear', {}).get('x', 0.0)
-            linear_y = velocity.get('linear', {}).get('y', 0.0)
+            velocity = parsed_data.get('velocity', {})
+            linear = velocity.get('linear', {})
+            linear_x = linear.get('x', 0.0)
+            linear_y = linear.get('y', 0.0)
             angular_z = velocity.get('angular', {}).get('z', 0.0)
 
-            if not self.path or 'poses' not in self.path or len(self.path['poses']) == 0:
-                self.logger.warning("No valid path available")
-                self._send_cmd_vel(0.0, 0.0)
-                return
-            else:
-                goal_x = self.path['poses'][-1]['pose']['position']['x']
-                goal_y = self.path['poses'][-1]['pose']['position']['y']
-                goal_dist = np.sqrt((pose_x - goal_x)**2 + (pose_y - goal_y)**2)
-                self.logger.info(f"Path available with {len(self.path['poses'])} poses, goal: x={goal_x:.2f}, y={goal_y:.2f}, distance={goal_dist:.2f}")
-
-            # Prioritize odometry for position and orientation
-            if self.odom_data and 'pose' in self.odom_data and 'pose' in self.odom_data['pose']:
-                odom_pose = self.odom_data['pose']['pose']
-                odom_position = odom_pose.get('position', {})
-                x = odom_position.get('x', pose_x)
-                y = odom_position.get('y', pose_y)
-                odom_orientation = odom_pose.get('orientation', {})
-                qx = odom_orientation.get('x', pose_qx)
-                qy = odom_orientation.get('y', pose_qy)
-                qz = odom_orientation.get('z', pose_qz)
-                qw = odom_orientation.get('w', pose_qw)
-                self.logger.info(f"Odom vs Pose: odom_x={x:.2f}, odom_y={y:.2f}, pose_x={pose_x:.2f}, pose_y={pose_y:.2f}")
-            else:
-                self.logger.warning("No valid odom_data, using robot_pose")
-                x, y = pose_x, pose_y
-                qx, qy, qz, qw = pose_qx, pose_qy, pose_qz, pose_qw
-                self.logger.info(f"Using transformed position: x={x:.2f}, y={y:.2f}")
+            goal_x = self.path['poses'][-1]['pose']['position']['x']
+            goal_y = self.path['poses'][-1]['pose']['position']['y']
+            goal_dist = np.sqrt((x - goal_x)**2 + (y - goal_y)**2)
 
             siny_cosp = 2.0 * (qw * qz + qx * qy)
             cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
             theta = np.arctan2(siny_cosp, cosy_cosp)
-            self.logger.info(f"Robot orientation theta: {theta:.2f} rad")
+
+            self.logger.info(f"Odometry state: x={x:.2f}, y={y:.2f}, theta={theta:.2f}, goal_dist={goal_dist:.2f}")
 
             robot_state = FullState(
                 px=x,
@@ -383,10 +381,9 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 theta=theta,
                 radius=self.robot_radius
             )
-            self.logger.info(f"Robot state: px={robot_state.px:.2f}, py={robot_state.py:.2f}, vx={robot_state.vx:.2f}, vy={robot_state.vy:.2f}, theta={robot_state.theta:.2f}")
 
             human_states = []
-            max_humans = 5  # Fixed to match MockEnv.human_num
+            max_humans = 5
             self.logger.info(f"Detected {len(self.other_agents)} agents, capping at {max_humans}")
             for agent in self.other_agents[:max_humans]:
                 px, py = agent['position']
@@ -427,27 +424,100 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 static_obs=[]
             )
 
+            self.logger.info(f"Calling predict with {len(human_states)} human states")
             try:
-                self.logger.info(f"Calling predict with {len(human_states)} human states")
                 action = self.policy.predict(env_state)
                 self.logger.info(f"Action: v={action.v:.2f}, r={action.r:.2f}")
-                linear_x = float(action.v)
-                angular_z = float(action.r) / 0.25
+            except IndexError as e:
+                self.logger.error(f"IndexError in predict, likely nX_hums mismatch: {str(e)}")
+                self.logger.info(f"Human states: {len(human_states)}, retrying with single dummy state")
+                env_state.human_states = [FullState(
+                    px=0.0, py=0.0, vx=0.0, vy=0.0, gx=0.0, gy=0.0,
+                    v_pref=0.5, theta=0.0, radius=self.robot_radius
+                )]
+                action = self.policy.predict(env_state)
+                self.logger.info(f"Retry action: v={action.v:.2f}, r={action.r:.2f}")
 
-                if self.prev_cmd_vel is not None:
-                    linear_x = (1.0 - self.smoothing_factor) * linear_x + \
-                               self.smoothing_factor * self.prev_cmd_vel[0]
-                    angular_z = (1.0 - self.smoothing_factor) * angular_z + \
-                                self.smoothing_factor * self.prev_cmd_vel[2]
-                self.prev_cmd_vel = [linear_x, 0.0, angular_z]
+            linear_x = float(action.v)
+            angular_z = float(action.r) / 0.25
 
-                self.logger.info(f"Sending control commands: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
-                self._send_cmd_vel(linear_x, angular_z)
-            except Exception as e:
-                self.logger.error(f"Velocity computation failed: {str(e)}")
-                import traceback
-                self.logger.error(traceback.format_exc())
+            linear_x = np.clip(linear_x, -self.max_speed, self.max_speed)
+            angular_z = np.clip(angular_z, -self.max_angular_speed, self.max_angular_speed)
+
+            if self.speed_limit is not None:
+                linear_x = np.clip(linear_x, -self.speed_limit, self.speed_limit)
+
+            if self.prev_cmd_vel is not None:
+                linear_x = (1.0 - self.smoothing_factor) * linear_x + \
+                           self.smoothing_factor * self.prev_cmd_vel[0]
+                angular_z = (1.0 - self.smoothing_factor) * angular_z + \
+                            self.smoothing_factor * self.prev_cmd_vel[2]
+            self.prev_cmd_vel = [linear_x, 0.0, angular_z]
+
+            self.logger.info(f"Sending control commands: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
+            self._send_cmd_vel(linear_x, angular_z)
+        except Exception as e:
+            self.logger.error(f"Velocity computation failed: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            self._send_cmd_vel(0.0, 0.0)
+
+    def _data_callback(self, data):
+        try:
+            self.frame_count += 1
+            frame_delimiter = "=" * 50
+            self.logger.info(f"\n{frame_delimiter}\nPROCESSING FRAME {self.frame_count}")
+
+            if isinstance(data, list) and len(data) > 0:
+                data_str = data[0]
+                if isinstance(data_str, bytes):
+                    data_str = data_str.decode()
+                parsed_data = yaml.safe_load(data_str)
+            else:
+                self.logger.error(f"Unexpected data type: {type(data)}")
                 self._send_cmd_vel(0.0, 0.0)
+                return
+
+            frame_info = parsed_data.get('frame_info', {})
+            frame_id = frame_info.get('id', 0)
+            timestamp = frame_info.get('timestamp', 0)
+            self.logger.info(f"Frame ID: {frame_id}, Timestamp: {timestamp}")
+
+            robot_pose = parsed_data.get('robot_pose', {})
+            position = robot_pose.get('position', {})
+            pose_x = position.get('x', 0.0)
+            pose_y = position.get('y', 0.0)
+            orientation = robot_pose.get('orientation', {})
+            pose_qx = orientation.get('x', 0.0)
+            pose_qy = orientation.get('y', 0.0)
+            pose_qz = orientation.get('z', 0.0)
+            pose_qw = orientation.get('w', 1.0)
+
+            velocity = parsed_data.get('robot_velocity', {})
+            linear = velocity.get('linear', {})
+            linear_x = linear.get('x', 0.0)
+            linear_y = linear.get('y', 0.0)
+            angular_z = velocity.get('angular', {}).get('z', 0.0)
+
+            if not self.path or 'poses' not in self.path or len(self.path['poses']) == 0:
+                self.logger.warning("No valid path available")
+                self._send_cmd_vel(0.0, 0.0)
+                return
+            else:
+                goal_x = self.path['poses'][-1]['pose']['position']['x']
+                goal_y = self.path['poses'][-1]['pose']['position']['y']
+                goal_dist = np.sqrt((pose_x - goal_x)**2 + (pose_y - goal_y)**2)
+                self.logger.info(f"Path available with {len(self.path['poses'])} poses, goal: x={goal_x:.2f}, y={goal_y:.2f}, distance={goal_dist:.2f}")
+
+            current_time = time.time()
+            if current_time - self.last_odom_time > self.odom_timeout:
+                self.logger.warning(f"No odometry received for {self.odom_timeout} seconds")
+                self._compute_velocity_commands({
+                    'pose': robot_pose,
+                    'velocity': velocity
+                })
+            else:
+                self.logger.info("Odometry available, skipping data callback velocity computation")
 
             self.logger.info(f"FRAME {self.frame_count} COMPLETED\n{frame_delimiter}")
         except Exception as e:
