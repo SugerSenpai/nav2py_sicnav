@@ -10,8 +10,51 @@ import numpy as np
 import pkg_resources
 import yaml
 import time
+import torch
 from sicnav.policy.campc import CollisionAvoidMPC as CAMPC
 from crowd_sim_plus.envs.utils.state_plus import FullState, FullyObservableJointState
+from copy import deepcopy
+
+class MockEnv:
+    def __init__(self):
+        self.time_limit = 100.0
+        self.time_step = 0.25
+        self.global_time = 1.0
+        self.circle_radius = 4.0
+        self.human_num = 5
+        self.max_humans = 10
+        self.square_width = 10.0
+        self.discomfort_dist = 0.2
+        self.discomfort_penalty_factor = 0.0
+        self.sim_env = 'general'
+        self.last_state = None
+        self.done = False
+        self.config = configparser.ConfigParser()
+        self.config.read_dict({
+            'humans': {
+                'visible': 'True',
+                'radius': '0.3',
+                'v_pref': '0.5',
+                'safety_space': '0.2',
+                'policy': 'orca_plus',
+                'sensor': 'perfect'
+            },
+            'env': {
+                'SB3': 'False'
+            }
+        })
+    
+    def set_human_observability(self, priviledged_info):
+        pass
+    
+    def reset(self):
+        pass
+    
+    def get_state(self):
+        pass
+    
+    def step(self, action):
+        pass
 
 class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
     def __init__(self, *args, **kwargs):
@@ -30,7 +73,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self._register_callback(topic, callback)
 
         self.logger = logging.getLogger('sicnav_controller')
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
         self.logger.addHandler(logging.StreamHandler())
         self.frame_count = 0
         self.path = None
@@ -45,9 +88,9 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         self.max_speed = 0.5
         self.neighbor_dist = 5.0
         self.time_horizon = 5.0
-        self.smoothing_factor = 0.3
+        self.smoothing_factor = 0.0
         self.max_angular_speed = 1.0
-        self.robot_radius = 0.3  # Approximate radius for Jackal
+        self.robot_radius = 0.32
 
         if self.max_speed <= 0.0:
             self.logger.warning('max_speed must be positive, setting to 0.5')
@@ -59,8 +102,8 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self.logger.warning('time_horizon must be positive, setting to 5.0')
             self.time_horizon = 5.0
         if self.smoothing_factor < 0.0 or self.smoothing_factor > 1.0:
-            self.logger.warning('smoothing_factor must be in [0,1], setting to 0.3')
-            self.smoothing_factor = 0.3
+            self.logger.warning('smoothing_factor must be in [0,1], setting to 0.0')
+            self.smoothing_factor = 0.0
         if self.max_angular_speed <= 0.0:
             self.logger.warning('max_angular_speed must be positive, setting to 1.0')
             self.max_angular_speed = 1.0
@@ -88,9 +131,17 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             config.read(config_path)
             self.policy = CAMPC()
             self.policy.configure(config)
-            self.logger.info('CAMPC policy initialized with config: %s', config_path)
+            self.policy.set_phase('test')
+            device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+            self.policy.set_device(device)
+            mock_env = MockEnv()
+            self.policy.set_env(mock_env)
+            self.logger.info('CAMPC policy initialized with config: %s, phase: test, device: %s, dummy_human: %s', 
+                            config_path, device, self.policy.dummy_human)
         except Exception as e:
             self.logger.error('Failed to initialize CAMPC: %s', str(e))
+            import traceback
+            self.logger.error(traceback.format_exc())
             raise
 
         self.logger.info('SicnavController initialized')
@@ -106,15 +157,12 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 self.odom_data = yaml.safe_load(data_str)
-                if current_time - self.last_log_time['odom'] >= 5.0:
-                    self.logger.debug('Processed odometry data: %s', self.odom_data)
         except Exception as e:
             self.logger.error(f'Error processing odometry data: {str(e)}')
             pass
 
     def _path_callback(self, path_):
         try:
-            self.logger.debug('Received path message: %s', path_)
             if isinstance(path_, list) and len(path_) > 0:
                 data_str = path_[0]
                 if isinstance(data_str, bytes):
@@ -134,34 +182,18 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         try:
             current_time = time.time()
             if current_time - self.last_log_time['scan'] >= 5.0:
-                self.logger.debug('Received scan message: %s', scan_)
+                self.logger.debug('Received scan message')
                 self.last_log_time['scan'] = current_time
             if isinstance(scan_, list) and len(scan_) > 0:
                 data_str = scan_[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 scan_data = yaml.safe_load(data_str)
-                if current_time - self.last_log_time['scan'] >= 5.0:
-                    self.logger.debug(f"Raw scan ranges: {scan_data['ranges'][:10]}")
                 self.other_agents = self.process_laserscan(scan_data)
                 if current_time - self.last_log_time['scan'] >= 5.0:
                     self.logger.debug(f'Processed LaserScan, detected {len(self.other_agents)} agents')
         except Exception as e:
             self.logger.error(f'Error processing scan data: {str(e)}')
-            pass
-
-    def _speed_limit_callback(self, speed_limit_):
-        try:
-            self.logger.debug('Received speed_limit message: %s', speed_limit_)
-            if isinstance(speed_limit_, list) and len(speed_limit_) == 2:
-                speed_limit, is_percentage = float(speed_limit_[0]), speed_limit_[1] == "true"
-                self.speed_limit = speed_limit if not is_percentage else speed_limit * self.max_speed
-                self.logger.info(f'Set speed limit: {self.speed_limit} (percentage: {is_percentage})')
-            else:
-                self.logger.error('Invalid speed limit data')
-                pass
-        except Exception as e:
-            self.logger.error(f'Error processing speed limit: {str(e)}')
             pass
 
     def process_laserscan(self, scan_data):
@@ -205,20 +237,30 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
 
         return agents
 
+    def _speed_limit_callback(self, speed_limit_):
+        try:
+            if isinstance(speed_limit_, list) and len(speed_limit_) == 2:
+                speed_limit, is_percentage = float(speed_limit_[0]), speed_limit_[1] == "true"
+                self.speed_limit = speed_limit if not is_percentage else speed_limit * self.max_speed
+                self.logger.info(f'Set speed limit: {self.speed_limit} (percentage: {is_percentage})')
+            else:
+                self.logger.error('Invalid speed limit data')
+                pass
+        except Exception as e:
+            self.logger.error(f'Error processing speed limit: {str(e)}')
+            pass
+
     def _data_callback(self, data):
         try:
-            self.logger.debug('Received data message: %s', data)
             self.frame_count += 1
             frame_delimiter = "=" * 50
-            self.logger.info(f"\n{frame_delimiter}")
-            self.logger.info(f"PROCESSING FRAME {self.frame_count}")
+            self.logger.info(f"\n{frame_delimiter}\nPROCESSING FRAME {self.frame_count}")
 
             if isinstance(data, list) and len(data) > 0:
                 data_str = data[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 parsed_data = yaml.safe_load(data_str)
-                self.logger.info("Data decoded successfully: %s", parsed_data)
             else:
                 self.logger.error(f"Unexpected data type: {type(data)}")
                 self._send_cmd_vel(0.0, 0.0)
@@ -248,31 +290,22 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 self.logger.warning("No valid path available")
                 self._send_cmd_vel(0.0, 0.0)
                 return
+            else:
+                self.logger.info(f"Path available with {len(self.path['poses'])} poses, goal: x={self.path['poses'][-1]['pose']['position']['x']:.2f}, y={self.path['poses'][-1]['pose']['position']['y']:.2f}")
 
             if self.odom_data:
                 odom_pose = self.odom_data.get('pose', {}).get('pose', {})
                 odom_position = odom_pose.get('position', {})
                 odom_x = odom_position.get('x', x)
                 odom_y = odom_position.get('y', y)
-                odom_orientation = odom_pose.get('orientation', {})
-                odom_qx = odom_orientation.get('x', qx)
-                odom_qy = odom_orientation.get('y', qy)
-                odom_qz = odom_orientation.get('z', qz)
-                odom_qw = odom_orientation.get('w', qw)
-                odom_velocity = self.odom_data.get('twist', {}).get('twist', {})
-                odom_linear_x = odom_velocity.get('linear', {}).get('x', linear_x)
-                odom_linear_y = odom_velocity.get('linear', {}).get('y', linear_y)
-                odom_angular_z = odom_velocity.get('angular', {}).get('z', angular_z)
-                self.logger.info(f"Odometry available: position x={odom_x:.2f}, y={odom_y:.2f}, velocity linear_x={odom_linear_x:.2f}, linear_y={odom_linear_y:.2f}")
+                self.logger.info(f"Odometry position: x={odom_x:.2f}, y={odom_y:.2f}")
             else:
-                self.logger.info(f"Using transformed data: position x={x:.2f}, y={y:.2f}, velocity linear_x={linear_x:.2f}, linear_y={linear_y:.2f}")
+                self.logger.info(f"Using transformed position: x={x:.2f}, y={y:.2f}")
 
-            # Convert quaternion to yaw (theta)
             siny_cosp = 2.0 * (qw * qz + qx * qy)
             cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
             theta = np.arctan2(siny_cosp, cosy_cosp)
 
-            # Create FullState for robot
             robot_state = FullState(
                 px=x,
                 py=y,
@@ -285,12 +318,12 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 radius=self.robot_radius
             )
 
-            # Create human states from agents
             human_states = []
-            for agent in self.other_agents:
+            max_humans = 5  # Match MockEnv.human_num
+            self.logger.info(f"Detected {len(self.other_agents)} agents, capping at {max_humans}")
+            for agent in self.other_agents[:max_humans]:
                 px, py = agent['position']
                 vx, vy = agent['velocity']
-                # Estimate goal as current position + velocity * 2 seconds
                 gx = px + vx * 2.0
                 gy = py + vy * 2.0
                 human_state = FullState(
@@ -300,23 +333,38 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                     vy=vy,
                     gx=gx,
                     gy=gy,
-                    v_pref=self.max_speed,  # Use robot's max_speed as approximation
+                    v_pref=0.5,
                     theta=np.arctan2(vy, vx) if (vx != 0 or vy != 0) else 0.0,
-                    radius=self.robot_radius  # Assume same radius as robot
+                    radius=self.robot_radius
                 )
                 human_states.append(human_state)
 
-            # Create FullyObservableJointState
+            if not human_states:
+                self.logger.info("No agents detected, adding dummy human state")
+                human_states.append(FullState(
+                    px=0.0,
+                    py=0.0,
+                    vx=0.0,
+                    vy=0.0,
+                    gx=0.0,
+                    gy=0.0,
+                    v_pref=0.5,
+                    theta=0.0,
+                    radius=self.robot_radius
+                ))
+
             env_state = FullyObservableJointState(
                 self_state=robot_state,
                 human_states=human_states,
-                static_obs=[]  # No static obstacles for now
+                static_obs=[]
             )
 
             try:
+                self.logger.info(f"Calling predict with {len(human_states)} human states")
                 action = self.policy.predict(env_state)
+                self.logger.info(f"Action: v={action.v:.2f}, r={action.r:.2f}")
                 linear_x = float(action.v)
-                angular_z = float(action.omega) / self.policy.time_step  # Convert back from integrated omega
+                angular_z = float(action.r) / 0.25
 
                 if self.prev_cmd_vel is not None:
                     linear_x = (1.0 - self.smoothing_factor) * linear_x + \
@@ -329,12 +377,15 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 self._send_cmd_vel(linear_x, angular_z)
             except Exception as e:
                 self.logger.error(f"Velocity computation failed: {str(e)}")
+                import traceback
+                self.logger.error(traceback.format_exc())
                 self._send_cmd_vel(0.0, 0.0)
 
-            self.logger.info(f"FRAME {self.frame_count} COMPLETED")
-            self.logger.info(f"{frame_delimiter}")
+            self.logger.info(f"FRAME {self.frame_count} COMPLETED\n{frame_delimiter}")
         except Exception as e:
             self.logger.error(f"Error processing data: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             self._send_cmd_vel(0.0, 0.0)
 
 if __name__ == "__main__":

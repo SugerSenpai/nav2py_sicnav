@@ -40,7 +40,6 @@ namespace nav2py_sicnav_controller
     clock_ = node->get_clock();
 
     // Declare parameters
-    // RCLCPP_DEBUG(logger_, "Declaring parameters for %s", plugin_name_.c_str());
     declare_parameter_if_not_declared(node, plugin_name_ + ".odom_topic", rclcpp::ParameterValue("/task_generator_node/jackal/odom"));
     declare_parameter_if_not_declared(node, plugin_name_ + ".transform_tolerance", rclcpp::ParameterValue(0.1));
     declare_parameter_if_not_declared(node, plugin_name_ + ".max_speed", rclcpp::ParameterValue(0.5));
@@ -48,28 +47,24 @@ namespace nav2py_sicnav_controller
     declare_parameter_if_not_declared(node, plugin_name_ + ".time_horizon", rclcpp::ParameterValue(5.0));
     declare_parameter_if_not_declared(node, plugin_name_ + ".smoothing_factor", rclcpp::ParameterValue(0.3));
     declare_parameter_if_not_declared(node, plugin_name_ + ".max_angular_speed", rclcpp::ParameterValue(1.0));
-    declare_parameter_if_not_declared(node, plugin_name_ + ".safety_threshold", rclcpp::ParameterValue(180.0));
+    declare_parameter_if_not_declared(node, plugin_name_ + ".safety_threshold", rclcpp::ParameterValue(255.0));
 
-    // Get odom_topic with logging
+    // Get odom_topic
     std::string odom_topic;
     try {
       rclcpp::Parameter odom_param;
       bool param_exists = node->get_parameter(plugin_name_ + ".odom_topic", odom_param);
       if (param_exists) {
         odom_topic = odom_param.as_string();
-        // RCLCPP_INFO(logger_, "Read odom_topic: %s (type: %s)", odom_topic.c_str(), odom_param.get_type_name().c_str());
       } else {
-        // RCLCPP_WARN(logger_, "Parameter %s not found, using default: /task_generator_node/jackal/odom", (plugin_name_ + ".odom_topic").c_str());
         odom_topic = "/task_generator_node/jackal/odom";
       }
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Exception reading odom_topic: %s, using default: /task_generator_node/jackal/odom", e.what());
       odom_topic = "/task_generator_node/jackal/odom";
     }
 
     // Validate odom_topic
     if (odom_topic.empty()) {
-      // RCLCPP_WARN(logger_, "odom_topic is empty, using default: /task_generator_node/jackal/odom");
       odom_topic = "/task_generator_node/jackal/odom";
     }
 
@@ -85,46 +80,34 @@ namespace nav2py_sicnav_controller
       node->get_parameter(plugin_name_ + ".max_angular_speed", max_angular_speed_);
       node->get_parameter(plugin_name_ + ".safety_threshold", safety_threshold_);
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Exception reading parameters: %s", e.what());
     }
 
     // Validate parameters
     if (max_speed_ <= 0.0) {
-      // RCLCPP_WARN(logger_, "max_speed must be positive, setting to 0.5");
       max_speed_ = 0.5;
     }
     if (neighbor_dist_ <= 0.0) {
-      // RCLCPP_WARN(logger_, "neighbor_dist must be positive, setting to 5.0");
       neighbor_dist_ = 5.0;
     }
     if (time_horizon_ <= 0.0) {
-      // RCLCPP_WARN(logger_, "time_horizon must be positive, setting to 5.0");
       time_horizon_ = 5.0;
     }
     if (smoothing_factor_ < 0.0 || smoothing_factor_ > 1.0) {
-      // RCLCPP_WARN(logger_, "smoothing_factor must be in [0,1], setting to 0.3");
       smoothing_factor_ = 0.3;
     }
     if (max_angular_speed_ <= 0.0) {
-      // RCLCPP_WARN(logger_, "max_angular_speed must be positive, setting to 1.0");
       max_angular_speed_ = 1.0;
     }
 
-    // Parameter callback with simple logging
+    // Parameter callback
     auto parameter_callback = [this](const std::vector<rclcpp::Parameter> parameters) -> rcl_interfaces::msg::SetParametersResult
     {
       rcl_interfaces::msg::SetParametersResult result;
       result.successful = true;
-      // RCLCPP_INFO(logger_, "Parameter callback invoked with %zu parameters", parameters.size());
       for (const auto &param : parameters) {
-        // RCLCPP_INFO(
-        //     logger_, "Parameter: %s, value: %s",
-        //     param.get_name().c_str(), param.value_to_string().c_str());
         if (param.get_name() == plugin_name_ + ".odom_topic") {
           if (!param.as_string().empty()) {
-            // RCLCPP_INFO(logger_, "Accepted odom_topic: %s", param.as_string().c_str());
           } else {
-            // RCLCPP_WARN(logger_, "Invalid odom_topic (empty), rejecting");
             result.successful = false;
             result.reason = "Invalid parameter value: odom_topic empty";
           }
@@ -142,27 +125,20 @@ namespace nav2py_sicnav_controller
           transform_tolerance_ = rclcpp::Duration::from_seconds(param.as_double());
         } else if (param.get_name() == plugin_name_ + ".safety_threshold") {
           safety_threshold_ = param.as_double();
-        } else {
-          // RCLCPP_WARN(logger_, "Ignoring unknown parameter: %s", param.get_name().c_str());
         }
       }
       return result;
     };
     try {
       parameter_callback_handle_ = node->add_on_set_parameters_callback(parameter_callback);
-      // RCLCPP_DEBUG(logger_, "Registered parameter callback");
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Failed to register parameter callback: %s", e.what());
     }
 
     // Initialize nav2py
     try {
       std::string nav2py_script = ament_index_cpp::get_package_share_directory("nav2py_sicnav_controller") + "/../../lib/nav2py_sicnav_controller/nav2py_run";
-      // RCLCPP_INFO(logger_, "Attempting to initialize nav2py with script: %s", nav2py_script.c_str());
       nav2py_bootstrap(nav2py_script + " --host 127.0.0.1 --port 0");
-      // RCLCPP_INFO(logger_, "Initialized nav2py successfully");
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Failed to initialize nav2py: %s", e.what());
       throw std::runtime_error("Failed to initialize nav2py");
     }
 
@@ -178,18 +154,15 @@ namespace nav2py_sicnav_controller
       auto laserscan_observation = costmap.findObservationByType("LaserScan");
       if (laserscan_observation.has_value()) {
         std::string topic = laserscan_observation.value().topic();
-        // RCLCPP_INFO(logger_, "Laser scan topic found: %s", topic.c_str());
         scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
             topic, rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
             std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
       } else {
-        // RCLCPP_WARN(logger_, "No laser scan topic found, falling back to /scan");
         scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
             "/scan", rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
             std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
       }
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error setting up LaserScan subscription: %s", e.what());
       scan_sub_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
           "/scan", rclcpp::QoS(rclcpp::KeepLast(10)).best_effort().durability_volatile(),
           std::bind(&SicnavController::sendScan, this, std::placeholders::_1));
@@ -197,25 +170,16 @@ namespace nav2py_sicnav_controller
 
     // Set up Odometry subscription
     try {
-      // RCLCPP_INFO(logger_, "Subscribing to odom_topic: %s", odom_topic.c_str());
       odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
           odom_topic, rclcpp::SensorDataQoS(),
           std::bind(&SicnavController::odomCallback, this, std::placeholders::_1));
-      // RCLCPP_INFO(logger_, "Subscribed to odometry topic: %s", odom_topic.c_str());
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error setting up odometry subscription: %s", e.what());
       throw std::runtime_error("Failed to set up odometry subscription");
     }
 
     // Initialize state
     last_cmd_vel_.header.frame_id = "";
     prev_cmd_vel_.header.frame_id = "";
-
-    // RCLCPP_INFO(
-    //     logger_,
-    //     "Configured controller: %s of type nav2py_sicnav_controller::SicnavController with "
-    //     "max_speed: %f, neighbor_dist: %f, time_horizon: %f, smoothing_factor: %f, max_angular_speed: %f",
-    //     plugin_name_.c_str(), max_speed_, neighbor_dist_, time_horizon_, smoothing_factor_, max_angular_speed_);
   }
 
   void SicnavController::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
@@ -223,9 +187,7 @@ namespace nav2py_sicnav_controller
     try {
       std::string odom_yaml = nav_msgs::msg::to_yaml(*msg, true);
       nav2py_send("odom", {odom_yaml});
-      // RCLCPP_DEBUG(logger_, "Sent odometry data to Python controller");
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error sending odometry: %s", e.what());
     }
   }
 
@@ -263,9 +225,7 @@ namespace nav2py_sicnav_controller
 
     try {
       nav2py_send("data", {ss.str()});
-      // RCLCPP_INFO(logger_, "Sent data to Python: frame %d, pose x=%.2f, y=%.2f", frame_count, pose.pose.position.x, pose.pose.position.y);
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error sending data to Python: %s", e.what());
     }
   }
 
@@ -275,19 +235,15 @@ namespace nav2py_sicnav_controller
       scan_pub_->publish(*scan);
       std::string scan_yaml = sensor_msgs::msg::to_yaml(*scan, true);
       nav2py_send("scan", {scan_yaml});
-      // RCLCPP_DEBUG(logger_, "Sent LaserScan data to Python controller");
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error sending LaserScan: %s", e.what());
     }
   }
 
   void SicnavController::cleanup()
   {
-    // RCLCPP_INFO(logger_, "Cleaning up controller: %s", plugin_name_.c_str());
     try {
       nav2py_cleanup();
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error during nav2py cleanup: %s", e.what());
     }
     global_pub_.reset();
     scan_pub_.reset();
@@ -298,14 +254,12 @@ namespace nav2py_sicnav_controller
 
   void SicnavController::activate()
   {
-    // RCLCPP_INFO(logger_, "Activating controller: %s", plugin_name_.c_str());
     global_pub_->on_activate();
     scan_pub_->on_activate();
   }
 
   void SicnavController::deactivate()
   {
-    // RCLCPP_INFO(logger_, "Deactivating controller: %s", plugin_name_.c_str());
     global_pub_->on_deactivate();
     scan_pub_->on_deactivate();
   }
@@ -315,9 +269,7 @@ namespace nav2py_sicnav_controller
     std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
     try {
       nav2py_send("speed_limit", {std::to_string(speed_limit), percentage ? "true" : "false"});
-      // RCLCPP_INFO(logger_, "Speed limit set to %f (percentage: %s)", speed_limit, percentage ? "true" : "false");
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error sending speed limit: %s", e.what());
     }
   }
 
@@ -327,13 +279,11 @@ namespace nav2py_sicnav_controller
       nav2_core::GoalChecker *goal_checker)
   {
     (void)goal_checker;
-    // RCLCPP_INFO(logger_, "Computing velocity commands for pose x=%.2f, y=%.2f", pose.pose.position.x, pose.pose.position.y);
 
     // Transform pose to global frame
     geometry_msgs::msg::PoseStamped transformed_pose;
     std::string global_frame = costmap_ros_->getGlobalFrameID();
     if (!transformPose(tf_, global_frame, pose, transformed_pose, transform_tolerance_.seconds())) {
-      // RCLCPP_ERROR(logger_, "Failed to transform pose to %s frame", global_frame.c_str());
       return last_cmd_vel_;
     }
 
@@ -349,7 +299,6 @@ namespace nav2py_sicnav_controller
         transformed_velocity.linear.x = vel_out.vector.x;
         transformed_velocity.linear.y = vel_out.vector.y;
       } catch (tf2::TransformException &ex) {
-        // RCLCPP_ERROR(logger_, "Failed to transform velocity: %s", ex.what());
         return last_cmd_vel_;
       }
     }
@@ -358,7 +307,6 @@ namespace nav2py_sicnav_controller
     try {
       sendData(transformed_pose, transformed_velocity);
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error sending data: %s", e.what());
     }
 
     geometry_msgs::msg::TwistStamped cmd_vel;
@@ -366,14 +314,9 @@ namespace nav2py_sicnav_controller
     cmd_vel.header.stamp = clock_->now();
 
     try {
-      // RCLCPP_DEBUG(logger_, "Waiting for velocity command from Python...");
       auto start_time = clock_->now();
       try {
         cmd_vel.twist = this->wait_for_cmd_vel();
-        // RCLCPP_INFO(
-        //     logger_,
-        //     "Received velocity command: linear_x=%.2f, angular_z=%.2f",
-        //     cmd_vel.twist.linear.x, cmd_vel.twist.angular.z);
       } catch (const std::exception &e) {
         if ((clock_->now() - start_time).seconds() >= 1.0) {
           throw std::runtime_error("Timeout waiting for velocity command");
@@ -382,7 +325,6 @@ namespace nav2py_sicnav_controller
         }
       }
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error receiving velocity command: %s", e.what());
       cmd_vel.twist.linear.x = 0.0;
       cmd_vel.twist.linear.y = 0.0;
       cmd_vel.twist.angular.z = 0.0;
@@ -390,6 +332,11 @@ namespace nav2py_sicnav_controller
 
     // Validate and smooth velocity
     std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
+    RCLCPP_INFO(logger_, "Received cmd_vel: linear_x=%f, angular_z=%f",
+                cmd_vel.twist.linear.x, cmd_vel.twist.angular.z);
+    last_cmd_vel_ = smoothVelocity(cmd_vel);
+    return last_cmd_vel_;
+    /*
     if (isValidCmdVel(cmd_vel)) {
       last_cmd_vel_ = smoothVelocity(cmd_vel);
     } else {
@@ -398,6 +345,7 @@ namespace nav2py_sicnav_controller
       last_cmd_vel_.twist.angular.z = 0.0;
     }
     return last_cmd_vel_;
+    */
   }
 
   void SicnavController::setPlan(const nav_msgs::msg::Path &path)
@@ -407,9 +355,7 @@ namespace nav2py_sicnav_controller
     try {
       std::string path_yaml = nav_msgs::msg::to_yaml(path, true);
       nav2py_send("path", {path_yaml});
-      // RCLCPP_INFO(logger_, "Sent path data to Python controller");
     } catch (const std::exception &e) {
-      // RCLCPP_ERROR(logger_, "Error sending path: %s", e.what());
     }
   }
 
@@ -426,7 +372,6 @@ namespace nav2py_sicnav_controller
       out_pose = tf->transform(in_pose, frame, tf_timeout);
       return true;
     } catch (tf2::TransformException &ex) {
-      // RCLCPP_ERROR(logger_, "Transform failed: %s", ex.what());
       return false;
     }
   }
@@ -438,7 +383,8 @@ namespace nav2py_sicnav_controller
         std::abs(cmd_vel.twist.linear.y) > max_speed_ ||
         std::abs(cmd_vel.twist.angular.z) > max_angular_speed_)
     {
-      // RCLCPP_WARN(logger_, "Command velocity exceeds limits");
+      RCLCPP_INFO(logger_, "Command velocity exceeds limits: linear_x=%f, linear_y=%f, angular_z=%f",
+                  cmd_vel.twist.linear.x, cmd_vel.twist.linear.y, cmd_vel.twist.angular.z);
       return false;
     }
 
@@ -454,10 +400,12 @@ namespace nav2py_sicnav_controller
         0.0,
         costmap_ros_->getRobotFootprint());
     if (cost >= safety_threshold_) {
-      // RCLCPP_WARN(logger_, "Command velocity would cause collision, cost: %f", cost);
+      RCLCPP_INFO(logger_, "Command velocity would cause collision, cost: %f", cost);
       return false;
     }
 
+    RCLCPP_INFO(logger_, "Valid command velocity: linear_x=%f, angular_z=%f, cost=%f",
+                cmd_vel.twist.linear.x, cmd_vel.twist.angular.z, cost);
     return true;
   }
 
