@@ -1,27 +1,36 @@
-#!/usr/bin/env python3
+#!/root/arena4_ws/install/nav2py_sicnav_controller/venv/bin/python
+
 import logging
 import os
 import sys
-
+import configparser
 import nav2py
 import nav2py.interfaces
 import numpy as np
 import pkg_resources
 import yaml
+import time
 from sicnav.policy.campc import CollisionAvoidMPC as CAMPC
-
+from crowd_sim_plus.envs.utils.state_plus import FullState, FullyObservableJointState
 
 class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._register_callback('data', self._data_callback)
-        self._register_callback('path', self._path_callback)
-        self._register_callback('scan', self._scan_callback)
-        self._register_callback('odom', self._odom_callback)
-        self._register_callback('speed_limit', self._speed_limit_callback)
+        self.odom_topic = "/task_generator_node/jackal/odom"
+        self._callbacks = {
+            'data': self._data_callback,
+            'path': self._path_callback,
+            'scan': self._scan_callback,
+            'sicnav/scan': self._scan_callback,
+            'task_generator_node/jackal/sicnav/scan': self._scan_callback,
+            self.odom_topic: self._odom_callback,
+            'speed_limit': self._speed_limit_callback
+        }
+        for topic, callback in self._callbacks.items():
+            self._register_callback(topic, callback)
 
         self.logger = logging.getLogger('sicnav_controller')
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
         self.logger.addHandler(logging.StreamHandler())
         self.frame_count = 0
         self.path = None
@@ -29,15 +38,17 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         self.odom_data = None
         self.prev_cmd_vel = None
         self.speed_limit = None
+        self.last_log_time = {'odom': 0, 'scan': 0}
 
-        # Parameters (aligned with C++)
+        self.logger.info('Registered callbacks for topics: %s', ', '.join(self._callbacks.keys()))
+
         self.max_speed = 0.5
         self.neighbor_dist = 5.0
         self.time_horizon = 5.0
         self.smoothing_factor = 0.3
         self.max_angular_speed = 1.0
+        self.robot_radius = 0.3  # Approximate radius for Jackal
 
-        # Validate parameters
         if self.max_speed <= 0.0:
             self.logger.warning('max_speed must be positive, setting to 0.5')
             self.max_speed = 0.5
@@ -54,19 +65,29 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self.logger.warning('max_angular_speed must be positive, setting to 1.0')
             self.max_angular_speed = 1.0
 
-        # Initialize CAMPC with dynamic config path
-        try:
-            config_path = pkg_resources.resource_filename(
-                'nav2py_sicnav_controller',
-                'safe-interactive-crowdnav/sicnav/configs/policy.config'
-            )
-        except pkg_resources.DistributionNotFound:
-            config_path = os.path.join(
-                os.path.dirname(__file__), "..", "safe-interactive-crowdnav", "sicnav", "configs", "policy.config"
-            )
+        config_path_candidates = [
+            os.path.join(os.path.dirname(__file__), '..', 'sicnav', 'configs', 'policy.config'),
+            pkg_resources.resource_filename('nav2py_sicnav_controller', 'safe-interactive-crowdnav/sicnav/configs/policy.config')
+        ]
+
+        config_path = None
+        for path in config_path_candidates:
+            self.logger.debug('Checking config path: %s', path)
+            if os.path.exists(path):
+                config_path = path
+                break
+
+        if config_path is None:
+            self.logger.error('Configuration file not found in any candidate paths: %s', config_path_candidates)
+            raise FileNotFoundError(f'Configuration file not found in any candidate paths: {config_path_candidates}')
+
         self.logger.info('Using config path: %s', config_path)
+
         try:
-            self.policy = CAMPC(config_path=config_path, max_speed=self.max_speed, time_horizon=self.time_horizon)
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            self.policy = CAMPC()
+            self.policy.configure(config)
             self.logger.info('CAMPC policy initialized with config: %s', config_path)
         except Exception as e:
             self.logger.error('Failed to initialize CAMPC: %s', str(e))
@@ -76,17 +97,24 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
 
     def _odom_callback(self, odom_):
         try:
+            current_time = time.time()
+            if current_time - self.last_log_time['odom'] >= 5.0:
+                self.logger.debug('Received odom message on %s', self.odom_topic)
+                self.last_log_time['odom'] = current_time
             if isinstance(odom_, list) and len(odom_) > 0:
                 data_str = odom_[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 self.odom_data = yaml.safe_load(data_str)
-                self.logger.debug('Received odometry data')
+                if current_time - self.last_log_time['odom'] >= 5.0:
+                    self.logger.debug('Processed odometry data: %s', self.odom_data)
         except Exception as e:
             self.logger.error(f'Error processing odometry data: {str(e)}')
+            pass
 
     def _path_callback(self, path_):
         try:
+            self.logger.debug('Received path message: %s', path_)
             if isinstance(path_, list) and len(path_) > 0:
                 data_str = path_[0]
                 if isinstance(data_str, bytes):
@@ -100,30 +128,41 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                     self.logger.info(f'Goal position: x={goal_x:.2f}, y={goal_y:.2f}')
         except Exception as e:
             self.logger.error(f'Error processing path data: {str(e)}')
+            pass
 
     def _scan_callback(self, scan_):
         try:
+            current_time = time.time()
+            if current_time - self.last_log_time['scan'] >= 5.0:
+                self.logger.debug('Received scan message: %s', scan_)
+                self.last_log_time['scan'] = current_time
             if isinstance(scan_, list) and len(scan_) > 0:
                 data_str = scan_[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 scan_data = yaml.safe_load(data_str)
-                self.logger.debug(f"Raw scan ranges: {scan_data['ranges'][:10]}")
+                if current_time - self.last_log_time['scan'] >= 5.0:
+                    self.logger.debug(f"Raw scan ranges: {scan_data['ranges'][:10]}")
                 self.other_agents = self.process_laserscan(scan_data)
-                self.logger.debug(f'Processed LaserScan, detected {len(self.other_agents)} agents')
+                if current_time - self.last_log_time['scan'] >= 5.0:
+                    self.logger.debug(f'Processed LaserScan, detected {len(self.other_agents)} agents')
         except Exception as e:
             self.logger.error(f'Error processing scan data: {str(e)}')
+            pass
 
     def _speed_limit_callback(self, speed_limit_):
         try:
+            self.logger.debug('Received speed_limit message: %s', speed_limit_)
             if isinstance(speed_limit_, list) and len(speed_limit_) == 2:
                 speed_limit, is_percentage = float(speed_limit_[0]), speed_limit_[1] == "true"
                 self.speed_limit = speed_limit if not is_percentage else speed_limit * self.max_speed
                 self.logger.info(f'Set speed limit: {self.speed_limit} (percentage: {is_percentage})')
             else:
                 self.logger.error('Invalid speed limit data')
+                pass
         except Exception as e:
             self.logger.error(f'Error processing speed limit: {str(e)}')
+            pass
 
     def process_laserscan(self, scan_data):
         agents = []
@@ -168,6 +207,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
 
     def _data_callback(self, data):
         try:
+            self.logger.debug('Received data message: %s', data)
             self.frame_count += 1
             frame_delimiter = "=" * 50
             self.logger.info(f"\n{frame_delimiter}")
@@ -178,7 +218,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
                 parsed_data = yaml.safe_load(data_str)
-                self.logger.info("Data decoded successfully")
+                self.logger.info("Data decoded successfully: %s", parsed_data)
             else:
                 self.logger.error(f"Unexpected data type: {type(data)}")
                 self._send_cmd_vel(0.0, 0.0)
@@ -209,7 +249,6 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 self._send_cmd_vel(0.0, 0.0)
                 return
 
-            # Prioritize transformed data (global frame) over odometry
             if self.odom_data:
                 odom_pose = self.odom_data.get('pose', {}).get('pose', {})
                 odom_position = odom_pose.get('position', {})
@@ -228,53 +267,75 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             else:
                 self.logger.info(f"Using transformed data: position x={x:.2f}, y={y:.2f}, velocity linear_x={linear_x:.2f}, linear_y={linear_y:.2f}")
 
-            robot_state = {
-                'position': np.array([x, y]),
-                'orientation': np.array([qx, qy, qz, qw]),
-                'velocity': np.array([linear_x, linear_y]),
-                'angular_velocity': angular_z,
-                'goal': np.array([
-                    self.path['poses'][-1]['pose']['position']['x'],
-                    self.path['poses'][-1]['pose']['position']['y']
-                ]),
-                'path': np.array([
-                    [pose['pose']['position']['x'], pose['pose']['position']['y']]
-                    for pose in self.path['poses']
-                ])
-            }
+            # Convert quaternion to yaw (theta)
+            siny_cosp = 2.0 * (qw * qz + qx * qy)
+            cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+            theta = np.arctan2(siny_cosp, cosy_cosp)
+
+            # Create FullState for robot
+            robot_state = FullState(
+                px=x,
+                py=y,
+                vx=linear_x,
+                vy=linear_y,
+                gx=self.path['poses'][-1]['pose']['position']['x'],
+                gy=self.path['poses'][-1]['pose']['position']['y'],
+                v_pref=self.max_speed,
+                theta=theta,
+                radius=self.robot_radius
+            )
+
+            # Create human states from agents
+            human_states = []
+            for agent in self.other_agents:
+                px, py = agent['position']
+                vx, vy = agent['velocity']
+                # Estimate goal as current position + velocity * 2 seconds
+                gx = px + vx * 2.0
+                gy = py + vy * 2.0
+                human_state = FullState(
+                    px=px,
+                    py=py,
+                    vx=vx,
+                    vy=vy,
+                    gx=gx,
+                    gy=gy,
+                    v_pref=self.max_speed,  # Use robot's max_speed as approximation
+                    theta=np.arctan2(vy, vx) if (vx != 0 or vy != 0) else 0.0,
+                    radius=self.robot_radius  # Assume same radius as robot
+                )
+                human_states.append(human_state)
+
+            # Create FullyObservableJointState
+            env_state = FullyObservableJointState(
+                self_state=robot_state,
+                human_states=human_states,
+                static_obs=[]  # No static obstacles for now
+            )
 
             try:
-                # Prepare state for CAMPC
-                state = {
-                    'robot': robot_state,
-                    'agents': self.other_agents,
-                    'max_speed': self.speed_limit if self.speed_limit is not None else self.max_speed,
-                    'time_horizon': self.time_horizon
-                }
-                velocity = self.policy.compute_action(state)
-                linear_x = float(velocity[0])
-                angular_z = float(velocity[1])
+                action = self.policy.predict(env_state)
+                linear_x = float(action.v)
+                angular_z = float(action.omega) / self.policy.time_step  # Convert back from integrated omega
 
-                # Smooth velocity
                 if self.prev_cmd_vel is not None:
                     linear_x = (1.0 - self.smoothing_factor) * linear_x + \
-                        self.smoothing_factor * self.prev_cmd_vel[0]
+                               self.smoothing_factor * self.prev_cmd_vel[0]
                     angular_z = (1.0 - self.smoothing_factor) * angular_z + \
-                        self.smoothing_factor * self.prev_cmd_vel[2]
+                                self.smoothing_factor * self.prev_cmd_vel[2]
                 self.prev_cmd_vel = [linear_x, 0.0, angular_z]
 
                 self.logger.info(f"Sending control commands: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
                 self._send_cmd_vel(linear_x, angular_z)
             except Exception as e:
-                self.logger.error(f"Velocity computation failed: %s", str(e))
+                self.logger.error(f"Velocity computation failed: {str(e)}")
                 self._send_cmd_vel(0.0, 0.0)
 
             self.logger.info(f"FRAME {self.frame_count} COMPLETED")
             self.logger.info(f"{frame_delimiter}")
         except Exception as e:
-            self.logger.error(f"Error processing data: %s", str(e))
+            self.logger.error(f"Error processing data: {str(e)}")
             self._send_cmd_vel(0.0, 0.0)
-
 
 if __name__ == "__main__":
     nav2py.main(SicnavController)
