@@ -76,6 +76,8 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         self.logger.setLevel(logging.INFO)
         self.logger.addHandler(logging.StreamHandler())
         self.frame_count = 0
+        self.odom_count = 0
+        self.last_odom_time = 0
         self.path = None
         self.other_agents = []
         self.odom_data = None
@@ -127,8 +129,48 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
         self.logger.info('Using config path: %s', config_path)
 
         try:
+            with open(config_path, 'r') as f:
+                config_content = f.read()
+                self.logger.info(f'Raw policy.config content:\n{config_content}')
             config = configparser.ConfigParser()
             config.read(config_path)
+            self.logger.info(f'Config sections: {config.sections()}')
+            for section in config.sections():
+                self.logger.info(f'Config [{section}]: {dict(config[section])}')
+            if not config.sections():
+                self.logger.warning('Empty policy.config, using fallback')
+                config.read_dict({
+                    'campc': {
+                        'horiz': '4',
+                        'soft_constraints': 'true',
+                        'term_const': 'false',
+                        'ref_type': 'point_stab',
+                        'new_ref_each_step': 'false',
+                        'warmstart': 'true'
+                    },
+                    'mpc_env': {
+                        'hum_model': 'orca_casadi_kkt',
+                        'priviledged_info': 'true',
+                        'human_v_max_assumption': '0.5'
+                    }
+                })
+            if 'campc' not in config.sections():
+                self.logger.warning('No [campc] section, adding fallback')
+                config['campc'] = {
+                    'horiz': '4',
+                    'soft_constraints': 'true',
+                    'term_const': 'false',
+                    'ref_type': 'point_stab',
+                    'new_ref_each_step': 'false',
+                    'warmstart': 'true'
+                }
+            if 'mpc_env' not in config.sections():
+                self.logger.warning('No [mpc_env] section, adding fallback')
+                config['mpc_env'] = {
+                    'hum_model': 'orca_casadi_kkt',
+                    'priviledged_info': 'true',
+                    'human_v_max_assumption': '0.5'
+                }
             self.policy = CAMPC()
             self.policy.configure(config)
             self.policy.set_phase('test')
@@ -136,10 +178,10 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
             self.policy.set_device(device)
             mock_env = MockEnv()
             self.policy.set_env(mock_env)
-            self.logger.info('CAMPC policy initialized with config: %s, phase: test, device: %s, dummy_human: %s', 
+            self.logger.info('CAMPC policy initialized with config: %s, phase: test, device: %s, dummy_human: %s',
                             config_path, device, self.policy.dummy_human)
         except Exception as e:
-            self.logger.error('Failed to initialize CAMPC: %s', str(e))
+            self.logger.error(f'Failed to initialize CAMPC: {str(e)}')
             import traceback
             self.logger.error(traceback.format_exc())
             raise
@@ -149,17 +191,28 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
     def _odom_callback(self, odom_):
         try:
             current_time = time.time()
+            self.odom_count += 1
             if current_time - self.last_log_time['odom'] >= 5.0:
                 self.logger.debug('Received odom message on %s', self.odom_topic)
+                self.logger.info(f'Odom message {self.odom_count}, time since last: {current_time - self.last_odom_time:.2f}s')
                 self.last_log_time['odom'] = current_time
+            self.last_odom_time = current_time
             if isinstance(odom_, list) and len(odom_) > 0:
                 data_str = odom_[0]
                 if isinstance(data_str, bytes):
                     data_str = data_str.decode()
+                self.logger.debug(f'Raw odom data: {data_str}')
                 self.odom_data = yaml.safe_load(data_str)
+                if self.odom_data and 'header' in self.odom_data:
+                    self.logger.info(f'Odom frame_id: {self.odom_data["header"]["frame_id"]}')
+                else:
+                    self.logger.warning('Invalid odom_data structure')
+            else:
+                self.logger.warning('Empty or invalid odom message')
+                self.odom_data = None
         except Exception as e:
             self.logger.error(f'Error processing odometry data: {str(e)}')
-            pass
+            self.odom_data = None
 
     def _path_callback(self, path_):
         try:
@@ -273,13 +326,13 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
 
             robot_pose = parsed_data.get('robot_pose', {})
             position = robot_pose.get('position', {})
-            x = position.get('x', 0.0)
-            y = position.get('y', 0.0)
+            pose_x = position.get('x', 0.0)
+            pose_y = position.get('y', 0.0)
             orientation = robot_pose.get('orientation', {})
-            qx = orientation.get('x', 0.0)
-            qy = orientation.get('y', 0.0)
-            qz = orientation.get('z', 0.0)
-            qw = orientation.get('w', 1.0)
+            pose_qx = orientation.get('x', 0.0)
+            pose_qy = orientation.get('y', 0.0)
+            pose_qz = orientation.get('z', 0.0)
+            pose_qw = orientation.get('w', 1.0)
 
             velocity = parsed_data.get('robot_velocity', {})
             linear_x = velocity.get('linear', {}).get('x', 0.0)
@@ -291,35 +344,49 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                 self._send_cmd_vel(0.0, 0.0)
                 return
             else:
-                self.logger.info(f"Path available with {len(self.path['poses'])} poses, goal: x={self.path['poses'][-1]['pose']['position']['x']:.2f}, y={self.path['poses'][-1]['pose']['position']['y']:.2f}")
+                goal_x = self.path['poses'][-1]['pose']['position']['x']
+                goal_y = self.path['poses'][-1]['pose']['position']['y']
+                goal_dist = np.sqrt((pose_x - goal_x)**2 + (pose_y - goal_y)**2)
+                self.logger.info(f"Path available with {len(self.path['poses'])} poses, goal: x={goal_x:.2f}, y={goal_y:.2f}, distance={goal_dist:.2f}")
 
-            if self.odom_data:
-                odom_pose = self.odom_data.get('pose', {}).get('pose', {})
+            # Prioritize odometry for position and orientation
+            if self.odom_data and 'pose' in self.odom_data and 'pose' in self.odom_data['pose']:
+                odom_pose = self.odom_data['pose']['pose']
                 odom_position = odom_pose.get('position', {})
-                odom_x = odom_position.get('x', x)
-                odom_y = odom_position.get('y', y)
-                self.logger.info(f"Odometry position: x={odom_x:.2f}, y={odom_y:.2f}")
+                x = odom_position.get('x', pose_x)
+                y = odom_position.get('y', pose_y)
+                odom_orientation = odom_pose.get('orientation', {})
+                qx = odom_orientation.get('x', pose_qx)
+                qy = odom_orientation.get('y', pose_qy)
+                qz = odom_orientation.get('z', pose_qz)
+                qw = odom_orientation.get('w', pose_qw)
+                self.logger.info(f"Odom vs Pose: odom_x={x:.2f}, odom_y={y:.2f}, pose_x={pose_x:.2f}, pose_y={pose_y:.2f}")
             else:
+                self.logger.warning("No valid odom_data, using robot_pose")
+                x, y = pose_x, pose_y
+                qx, qy, qz, qw = pose_qx, pose_qy, pose_qz, pose_qw
                 self.logger.info(f"Using transformed position: x={x:.2f}, y={y:.2f}")
 
             siny_cosp = 2.0 * (qw * qz + qx * qy)
             cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
             theta = np.arctan2(siny_cosp, cosy_cosp)
+            self.logger.info(f"Robot orientation theta: {theta:.2f} rad")
 
             robot_state = FullState(
                 px=x,
                 py=y,
                 vx=linear_x,
                 vy=linear_y,
-                gx=self.path['poses'][-1]['pose']['position']['x'],
-                gy=self.path['poses'][-1]['pose']['position']['y'],
+                gx=goal_x,
+                gy=goal_y,
                 v_pref=self.max_speed,
                 theta=theta,
                 radius=self.robot_radius
             )
+            self.logger.info(f"Robot state: px={robot_state.px:.2f}, py={robot_state.py:.2f}, vx={robot_state.vx:.2f}, vy={robot_state.vy:.2f}, theta={robot_state.theta:.2f}")
 
             human_states = []
-            max_humans = 5  # Match MockEnv.human_num
+            max_humans = 5  # Fixed to match MockEnv.human_num
             self.logger.info(f"Detected {len(self.other_agents)} agents, capping at {max_humans}")
             for agent in self.other_agents[:max_humans]:
                 px, py = agent['position']
@@ -353,6 +420,7 @@ class SicnavController(nav2py.interfaces.nav2py_costmap_controller):
                     radius=self.robot_radius
                 ))
 
+            self.logger.info(f"Human states count: {len(human_states)}")
             env_state = FullyObservableJointState(
                 self_state=robot_state,
                 human_states=human_states,
